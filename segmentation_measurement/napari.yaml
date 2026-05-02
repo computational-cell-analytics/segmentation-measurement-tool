@@ -1,0 +1,10 @@
+name: segmentation-measurement
+display_name: Segmentation Measurement
+contributions:
+  commands:
+    - id: segmentation-measurement.postprocessing_widget
+      python_name: segmentation_measurement._widget:PostprocessingWidget
+      title: Postprocessing
+  widgets:
+    - command: segmentation-measurement.postprocessing_widget
+      display_name: Postprocessing

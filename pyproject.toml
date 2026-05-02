@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "segmentation-measurement"
+version = "0.1.0"
+description = "Post-processing and measurements of instance segmentations for microscopy image analysis"
+license = {file = "LICENSE"}
+requires-python = ">=3.9"
+dependencies = [
+    "numpy",
+    "scipy",
+    "scikit-image",
+    "pandas",
+    "tifffile",
+]
+
+[project.optional-dependencies]
+napari = [
+    "napari",
+    "magicgui",
+    "npe2",
+    "qtpy",
+]
+
+[project.entry-points."console_scripts"]
+segmentation-measurement = "segmentation_measurement._cli:main"
+
+[project.entry-points."napari.manifest"]
+"segmentation-measurement" = "segmentation_measurement:napari.yaml"
+
+[tool.setuptools.packages.find]
+where = ["."]
+
+[tool.setuptools.package-data]
+"segmentation_measurement" = ["napari.yaml"]
