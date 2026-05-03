@@ -2,39 +2,31 @@
 
 from __future__ import annotations
 
-import numpy as np
 import pandas as pd
 import napari
 from qtpy.QtWidgets import (
     QComboBox,
-    QDoubleSpinBox,
     QFileDialog,
     QGroupBox,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QPushButton,
     QScrollArea,
-    QSpinBox,
     QTableWidget,
-    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
+from segmentation_measurement._utils import populate_table_widget, register_table, save_table
+
 
 class IntensityWidget(QWidget):
-    """Widget for measuring per-segment intensities and categorizing by threshold."""
+    """Widget for measuring per-segment intensities."""
 
-    def __init__(self, viewer: napari.Viewer) -> None:
+    def __init__(self, napari_viewer: napari.Viewer) -> None:
         super().__init__()
-        self._viewer = viewer
+        self._viewer = napari_viewer
         self._measurements: pd.DataFrame | None = None
-        self._threshold_spins: list[QDoubleSpinBox] = []
-        self._name_edits: list[QLineEdit] = []
-        self._hist_fig = None
-        self._hist_ax = None
-        self._hist_canvas = None
         self._setup_ui()
         self._viewer.layers.events.inserted.connect(self._update_layer_combos)
         self._viewer.layers.events.removed.connect(self._update_layer_combos)
@@ -53,7 +45,6 @@ class IntensityWidget(QWidget):
         layout = QVBoxLayout()
         inner.setLayout(layout)
 
-        # Input section
         seg_layout = QHBoxLayout()
         seg_layout.addWidget(QLabel("Segmentation:"))
         self._seg_combo = QComboBox()
@@ -70,7 +61,6 @@ class IntensityWidget(QWidget):
         self._measure_btn.clicked.connect(self._run_measurement)
         layout.addWidget(self._measure_btn)
 
-        # Results table
         table_group = QGroupBox("Measurements")
         table_layout = QVBoxLayout()
         self._table = QTableWidget()
@@ -81,106 +71,6 @@ class IntensityWidget(QWidget):
         table_layout.addWidget(save_btn)
         table_group.setLayout(table_layout)
         layout.addWidget(table_group)
-
-        # Histogram
-        hist_group = QGroupBox("Histogram")
-        hist_layout = QVBoxLayout()
-        col_layout = QHBoxLayout()
-        col_layout.addWidget(QLabel("Column:"))
-        self._col_combo = QComboBox()
-        self._col_combo.currentTextChanged.connect(self._update_histogram)
-        col_layout.addWidget(self._col_combo)
-        hist_layout.addLayout(col_layout)
-        hist_layout.addWidget(self._make_histogram_canvas())
-        hist_group.setLayout(hist_layout)
-        layout.addWidget(hist_group)
-
-        # Categorization
-        cat_group = QGroupBox("Categorization")
-        cat_layout = QVBoxLayout()
-
-        n_layout = QHBoxLayout()
-        n_layout.addWidget(QLabel("Number of categories:"))
-        self._n_spin = QSpinBox()
-        self._n_spin.setRange(2, 10)
-        self._n_spin.setValue(3)
-        self._n_spin.valueChanged.connect(self._rebuild_threshold_widgets)
-        n_layout.addWidget(self._n_spin)
-        cat_layout.addLayout(n_layout)
-
-        self._threshold_container = QWidget()
-        self._threshold_layout = QVBoxLayout()
-        self._threshold_layout.setContentsMargins(0, 0, 0, 0)
-        self._threshold_container.setLayout(self._threshold_layout)
-        cat_layout.addWidget(self._threshold_container)
-
-        self._suggest_btn = QPushButton("Suggest thresholds")
-        self._suggest_btn.clicked.connect(self._suggest_thresholds)
-        cat_layout.addWidget(self._suggest_btn)
-
-        out_layout = QHBoxLayout()
-        out_layout.addWidget(QLabel("Output layer:"))
-        self._out_name = QLineEdit("categories")
-        out_layout.addWidget(self._out_name)
-        cat_layout.addLayout(out_layout)
-
-        self._categorize_btn = QPushButton("Categorize")
-        self._categorize_btn.clicked.connect(self._run_categorization)
-        cat_layout.addWidget(self._categorize_btn)
-
-        cat_group.setLayout(cat_layout)
-        layout.addWidget(cat_group)
-
-        self._rebuild_threshold_widgets()
-
-    def _make_histogram_canvas(self) -> QWidget:
-        try:
-            from matplotlib.figure import Figure
-            try:
-                from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
-            except ImportError:
-                from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
-            self._hist_fig = Figure()
-            self._hist_ax = self._hist_fig.add_subplot(111)
-            self._hist_canvas = FigureCanvasQTAgg(self._hist_fig)
-            self._hist_canvas.setMinimumHeight(150)
-            return self._hist_canvas
-        except ImportError:
-            return QLabel("Install matplotlib for histogram display.")
-
-    def _rebuild_threshold_widgets(self) -> None:
-        while self._threshold_layout.count():
-            item = self._threshold_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-        self._threshold_spins = []
-        self._name_edits = []
-
-        n = self._n_spin.value()
-        for i in range(n - 1):
-            row_widget = QWidget()
-            row = QHBoxLayout()
-            row.setContentsMargins(0, 0, 0, 0)
-            row.addWidget(QLabel(f"Threshold {i + 1}:"))
-            spin = QDoubleSpinBox()
-            spin.setRange(-1e9, 1e9)
-            spin.setDecimals(4)
-            spin.valueChanged.connect(self._update_histogram)
-            self._threshold_spins.append(spin)
-            row.addWidget(spin)
-            row_widget.setLayout(row)
-            self._threshold_layout.addWidget(row_widget)
-
-        for i in range(n):
-            row_widget = QWidget()
-            row = QHBoxLayout()
-            row.setContentsMargins(0, 0, 0, 0)
-            row.addWidget(QLabel(f"Name {i + 1}:"))
-            edit = QLineEdit(f"category_{i + 1}")
-            self._name_edits.append(edit)
-            row.addWidget(edit)
-            row_widget.setLayout(row)
-            self._threshold_layout.addWidget(row_widget)
 
     def _update_layer_combos(self, event: object = None) -> None:
         from napari.layers import Image, Labels
@@ -212,101 +102,8 @@ class IntensityWidget(QWidget):
         segmentation = self._viewer.layers[seg_name].data
         intensity_image = self._viewer.layers[img_name].data
         self._measurements = measure_intensities(segmentation, intensity_image)
-        self._update_table()
-        self._update_col_combo()
-
-    def _update_table(self) -> None:
-        if self._measurements is None:
-            return
-        df = self._measurements
-        self._table.setRowCount(len(df))
-        self._table.setColumnCount(len(df.columns))
-        self._table.setHorizontalHeaderLabels(list(df.columns))
-        for row_idx in range(len(df)):
-            for col_idx, val in enumerate(df.iloc[row_idx]):
-                text = f"{val:.4f}" if isinstance(val, float) else str(val)
-                self._table.setItem(row_idx, col_idx, QTableWidgetItem(text))
-        self._table.resizeColumnsToContents()
-
-    def _update_col_combo(self) -> None:
-        if self._measurements is None:
-            return
-        numeric_cols = [
-            c for c in self._measurements.select_dtypes(include="number").columns
-            if c not in ("label", "category_id")
-        ]
-        current = self._col_combo.currentText()
-        self._col_combo.blockSignals(True)
-        self._col_combo.clear()
-        self._col_combo.addItems(numeric_cols)
-        if current in numeric_cols:
-            self._col_combo.setCurrentText(current)
-        self._col_combo.blockSignals(False)
-        self._update_histogram()
-
-    def _update_histogram(self) -> None:
-        if self._hist_ax is None or self._measurements is None:
-            return
-        col = self._col_combo.currentText()
-        if not col or col not in self._measurements.columns:
-            return
-        ax = self._hist_ax
-        ax.clear()
-        values = self._measurements[col].values
-        ax.hist(values, bins=20, color="steelblue", alpha=0.7)
-        ax.set_xlabel(col)
-        ax.set_ylabel("count")
-        for spin in self._threshold_spins:
-            ax.axvline(spin.value(), color="red", linestyle="--", linewidth=1.5)
-        self._hist_fig.tight_layout()
-        self._hist_canvas.draw()
-
-    def _suggest_thresholds(self) -> None:
-        from segmentation_measurement.intensity import suggest_thresholds
-        if self._measurements is None:
-            return
-        col = self._col_combo.currentText()
-        if not col:
-            return
-        n = self._n_spin.value()
-        thresholds = suggest_thresholds(self._measurements, col, n)
-        for spin, val in zip(self._threshold_spins, thresholds):
-            spin.blockSignals(True)
-            spin.setValue(val)
-            spin.blockSignals(False)
-        self._update_histogram()
-
-    def _run_categorization(self) -> None:
-        from segmentation_measurement.intensity import categorize_by_intensity
-        if self._measurements is None:
-            return
-        col = self._col_combo.currentText()
-        if not col:
-            return
-        thresholds = [spin.value() for spin in self._threshold_spins]
-        names = [edit.text() for edit in self._name_edits]
-        self._measurements = categorize_by_intensity(
-            self._measurements, col, thresholds, names
-        )
-        self._update_table()
-        self._update_col_combo()
-
-        seg_name = self._seg_combo.currentText()
-        if not seg_name:
-            return
-        segmentation = self._viewer.layers[seg_name].data
-        result = np.zeros_like(segmentation)
-        for label_id, cat_id in zip(
-            self._measurements["label"].values,
-            self._measurements["category_id"].values,
-        ):
-            result[segmentation == int(label_id)] = int(cat_id)
-        out_name = self._out_name.text() or "categories"
-        existing = [layer.name for layer in self._viewer.layers]
-        if out_name in existing:
-            self._viewer.layers[out_name].data = result
-        else:
-            self._viewer.add_labels(result, name=out_name)
+        populate_table_widget(self._table, self._measurements)
+        register_table(f"Intensity ({seg_name})", self._measurements)
 
     def _save_table(self) -> None:
         if self._measurements is None:
@@ -317,11 +114,5 @@ class IntensityWidget(QWidget):
             "",
             "CSV (*.csv);;TSV (*.tsv);;Excel (*.xlsx);;All Files (*)",
         )
-        if not path:
-            return
-        if path.endswith(".xlsx"):
-            self._measurements.to_excel(path, index=False)
-        elif path.endswith(".tsv"):
-            self._measurements.to_csv(path, sep="\t", index=False)
-        else:
-            self._measurements.to_csv(path, index=False)
+        if path:
+            save_table(self._measurements, path)

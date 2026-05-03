@@ -1,4 +1,4 @@
-"""Tests for intensity measurement functions and CLI."""
+"""Tests for intensity measurement function and CLI."""
 
 import os
 import tempfile
@@ -9,11 +9,7 @@ import numpy as np
 import pandas as pd
 import tifffile
 
-from segmentation_measurement.intensity import (
-    categorize_by_intensity,
-    measure_intensities,
-    suggest_thresholds,
-)
+from segmentation_measurement.intensity import measure_intensities
 
 
 class TestMeasureIntensities(unittest.TestCase):
@@ -88,118 +84,6 @@ class TestMeasureIntensities(unittest.TestCase):
         result = measure_intensities(seg, intensity)
         self.assertEqual(len(result), 0)
         self.assertIn("label", result.columns)
-
-
-class TestSuggestThresholds(unittest.TestCase):
-
-    def _make_measurements(self):
-        return pd.DataFrame({
-            "label": np.arange(1, 11),
-            "mean_intensity": np.linspace(0.0, 100.0, 10),
-        })
-
-    def test_returns_correct_count(self):
-        df = self._make_measurements()
-        for n in range(2, 6):
-            thresholds = suggest_thresholds(df, "mean_intensity", n)
-            self.assertEqual(len(thresholds), n - 1)
-
-    def test_thresholds_are_sorted(self):
-        df = self._make_measurements()
-        thresholds = suggest_thresholds(df, "mean_intensity", 4)
-        self.assertEqual(thresholds, sorted(thresholds))
-
-    def test_thresholds_within_data_range(self):
-        df = self._make_measurements()
-        thresholds = suggest_thresholds(df, "mean_intensity", 3)
-        for t in thresholds:
-            self.assertGreater(t, df["mean_intensity"].min())
-            self.assertLess(t, df["mean_intensity"].max())
-
-    def test_raises_on_invalid_n_categories(self):
-        df = self._make_measurements()
-        with self.assertRaises(ValueError):
-            suggest_thresholds(df, "mean_intensity", 1)
-
-    def test_raises_on_missing_column(self):
-        df = self._make_measurements()
-        with self.assertRaises(ValueError):
-            suggest_thresholds(df, "nonexistent", 3)
-
-
-class TestCategorizeByIntensity(unittest.TestCase):
-
-    def _make_measurements(self):
-        return pd.DataFrame({
-            "label": [1, 2, 3, 4, 5],
-            "mean_intensity": [10.0, 30.0, 50.0, 70.0, 90.0],
-        })
-
-    def test_adds_category_columns(self):
-        df = self._make_measurements()
-        result = categorize_by_intensity(df, "mean_intensity", [40.0])
-        self.assertIn("category_id", result.columns)
-        self.assertIn("category_name", result.columns)
-
-    def test_two_category_assignment(self):
-        df = self._make_measurements()
-        result = categorize_by_intensity(df, "mean_intensity", [40.0])
-        low = result[result["mean_intensity"] < 40.0]["category_id"].values
-        high = result[result["mean_intensity"] >= 40.0]["category_id"].values
-        self.assertTrue(np.all(low == 1))
-        self.assertTrue(np.all(high == 2))
-
-    def test_three_category_assignment(self):
-        df = self._make_measurements()
-        result = categorize_by_intensity(df, "mean_intensity", [35.0, 65.0])
-        self.assertEqual(
-            result[result["mean_intensity"] == 10.0].iloc[0]["category_id"], 1
-        )
-        self.assertEqual(
-            result[result["mean_intensity"] == 50.0].iloc[0]["category_id"], 2
-        )
-        self.assertEqual(
-            result[result["mean_intensity"] == 90.0].iloc[0]["category_id"], 3
-        )
-
-    def test_custom_category_names(self):
-        df = self._make_measurements()
-        result = categorize_by_intensity(
-            df, "mean_intensity", [40.0], ["low", "high"]
-        )
-        self.assertIn("low", result["category_name"].values)
-        self.assertIn("high", result["category_name"].values)
-
-    def test_default_category_names(self):
-        df = self._make_measurements()
-        result = categorize_by_intensity(df, "mean_intensity", [40.0])
-        self.assertIn("category_1", result["category_name"].values)
-        self.assertIn("category_2", result["category_name"].values)
-
-    def test_unsorted_thresholds_handled(self):
-        df = self._make_measurements()
-        result_sorted = categorize_by_intensity(df, "mean_intensity", [35.0, 65.0])
-        result_unsorted = categorize_by_intensity(df, "mean_intensity", [65.0, 35.0])
-        np.testing.assert_array_equal(
-            result_sorted["category_id"].values,
-            result_unsorted["category_id"].values,
-        )
-
-    def test_does_not_modify_input(self):
-        df = self._make_measurements()
-        original_cols = list(df.columns)
-        categorize_by_intensity(df, "mean_intensity", [40.0])
-        self.assertEqual(list(df.columns), original_cols)
-
-    def test_raises_on_missing_column(self):
-        df = self._make_measurements()
-        with self.assertRaises(ValueError):
-            categorize_by_intensity(df, "nonexistent", [40.0])
-
-    def test_raises_on_wrong_category_names_count(self):
-        df = self._make_measurements()
-        with self.assertRaises(ValueError):
-            categorize_by_intensity(df, "mean_intensity", [40.0], ["only_one"])
 
 
 class TestIntensityCLI(unittest.TestCase):
