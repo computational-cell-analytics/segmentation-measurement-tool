@@ -2,7 +2,7 @@
 
 The `segmentation-measurement` napari plugin provides interactive widgets for
 post-processing segmentation label layers and for computing and exploring per-segment
-intensity measurements – all without writing any Python code.
+measurements – all without writing any Python code.
 
 ## Installation
 
@@ -14,13 +14,17 @@ After installation the plugin is automatically discovered by napari.
 
 ## Opening the Widgets
 
-Open either widget from the napari menu:
+Open any widget from the napari menu:
 
-**Plugins → segmentation-measurement → Postprocessing**
+**Plugins → Segmentation Measurement → Postprocessing**
 
-**Plugins → segmentation-measurement → Intensity Measurement**
+**Plugins → Segmentation Measurement → Intensity Measurement → Intensity Measurement**
 
-Both widgets appear as dockable panels that can be placed anywhere in the napari window.
+**Plugins → Segmentation Measurement → Morphology Measurement → Morphology Measurement**
+
+**Plugins → Segmentation Measurement → Threshold Analysis → Threshold Analysis**
+
+All widgets appear as dockable panels that can be placed anywhere in the napari window.
 
 ---
 
@@ -92,9 +96,8 @@ commonly used to create pseudo-cytoplasm masks around segmented nuclei.
 
 ## Intensity Measurement Widget
 
-The Intensity Measurement widget follows a three-step workflow: measure per-segment
-intensities, explore the distribution with a histogram, then optionally classify segments
-into named categories based on thresholds.
+The Intensity Measurement widget computes per-segment intensity statistics from a label
+layer and a co-registered intensity image.
 
 ### Layout (scrollable)
 
@@ -106,23 +109,10 @@ into named categories based on thresholds.
 │ ┌ Measurements ──────────────┐ │
 │ │  <table>  [Save table]     │ │
 │ └────────────────────────────┘ │
-│ ┌ Histogram ──────────────────┐ │
-│ │ Column: [combo]             │ │
-│ │  <histogram plot>           │ │
-│ └────────────────────────────┘ │
-│ ┌ Categorization ─────────────┐ │
-│ │ Number of categories: [spin]│ │
-│ │ Threshold 1: [spin]         │ │
-│ │ ...                         │ │
-│ │ Name 1: [edit]  ...         │ │
-│ │ [Suggest thresholds]        │ │
-│ │ Output layer: [edit]        │ │
-│ │ [Categorize]                │ │
-│ └────────────────────────────┘ │
 └─────────────────────────────────┘
 ```
 
-### Step 1 – Measure Intensities
+### Workflow
 
 1. Select a **Segmentation** layer (Labels) from the first dropdown.
 2. Select an **Intensity image** layer (Image) from the second dropdown.
@@ -143,7 +133,10 @@ The **Measurements** table is filled with one row per segment.  The columns are:
 | `percentile_75` | 75th percentile (Q3) |
 | `percentile_90` | 90th percentile |
 
-#### Saving the table
+The table is also registered internally so that the **Threshold Analysis** widget can
+access it directly (see below).
+
+### Saving the table
 
 Click **Save table** to export the measurements to a file.  A file-save dialog opens
 and lets you choose the location and format:
@@ -152,20 +145,129 @@ and lets you choose the location and format:
 * **TSV** (`.tsv`) – tab-separated values
 * **Excel** (`.xlsx`) – Excel workbook
 
-### Step 2 – Explore with Histogram
+---
 
-The **Histogram** section shows the distribution of any numeric column in the
-measurements table.
+## Morphology Measurement Widget
 
-* Use the **Column** dropdown to switch between intensity statistics.
-* Threshold lines (see Step 3) are drawn in red so you can evaluate the split visually.
+The Morphology Measurement widget computes per-segment shape descriptors from a label
+layer.  Physical pixel/voxel sizes can be specified per axis to obtain measurements in
+real-world units.
+
+### Layout (scrollable)
+
+```
+┌─────────────────────────────────┐
+│ Segmentation: [combo]           │
+│ ┌ Physical pixel/voxel size ─┐ │
+│ │ Y: [spinbox]               │ │
+│ │ X: [spinbox]               │ │
+│ └────────────────────────────┘ │
+│ [Measure morphology]            │
+│ ┌ Measurements ──────────────┐ │
+│ │  <table>  [Save table]     │ │
+│ └────────────────────────────┘ │
+└─────────────────────────────────┘
+```
+
+For 3-D data a third spinbox **Z** is added automatically.
+
+### Workflow
+
+1. Select a **Segmentation** layer (Labels) from the dropdown.  The scale spinboxes are
+   pre-populated from the layer's `scale` attribute if it has been set; otherwise they
+   default to `1.0`.
+2. Adjust the per-axis scale values if needed.  For isotropic data a single value applies
+   to all axes; for anisotropic data set each axis independently.
+3. Click **Measure morphology**.
+
+The **Measurements** table is filled with one row per segment.
+
+**2-D columns**
+
+| Column | Description |
+|--------|-------------|
+| `label` | Integer segment label ID |
+| `area` | Area in physical units (px² or µm² etc.) |
+| `perimeter` | Perimeter length in physical units |
+| `sphericity` | Circularity: 1.0 for a perfect circle, <1 for elongated or irregular shapes |
+| `solidity` | Ratio of segment area to convex hull area |
+| `axis_major_length` | Length of the major axis of the fitted ellipse |
+| `axis_minor_length` | Length of the minor axis of the fitted ellipse |
+| `equivalent_diameter` | Diameter of a circle with the same area |
+
+**3-D columns**
+
+| Column | Description |
+|--------|-------------|
+| `label` | Integer segment label ID |
+| `volume` | Volume in physical units (vx³ or µm³ etc.) |
+| `surface_area` | Surface area computed via marching cubes |
+| `sphericity` | 1.0 for a perfect sphere, <1 for elongated or irregular shapes |
+| `solidity` | Ratio of segment volume to convex hull volume |
+| `axis_major_length` | Length of the major axis of the fitted ellipsoid |
+| `axis_minor_length` | Length of the minor axis of the fitted ellipsoid |
+| `equivalent_diameter` | Diameter of a sphere with the same volume |
+
+The table is also registered internally so that the **Threshold Analysis** widget can
+access it directly.
+
+### Saving the table
+
+Click **Save table** to export the measurements (same formats as Intensity Measurement).
+
+---
+
+## Threshold Analysis Widget
+
+The Threshold Analysis widget categorizes segments into named groups based on one or more
+thresholds applied to any numeric column in a previously computed measurement table.
+
+### Layout (scrollable)
+
+```
+┌──────────────────────────────────────┐
+│ ┌ Measurement table ───────────────┐ │
+│ │ Table: [combo]  [Refresh]        │ │
+│ │  <table>  [Save table]           │ │
+│ └──────────────────────────────────┘ │
+│ Segmentation: [combo]                │
+│ ┌ Column histogram ────────────────┐ │
+│ │ Column: [combo]                  │ │
+│ │  <histogram plot>                │ │
+│ └──────────────────────────────────┘ │
+│ ┌ Categorization ──────────────────┐ │
+│ │ Number of categories: [spin]     │ │
+│ │ Threshold 1: [spin]  ...         │ │
+│ │ Name 1: [edit]  ...              │ │
+│ │ [Suggest thresholds]             │ │
+│ │ Output layer: [edit]             │ │
+│ │ [Categorize]                     │ │
+│ └──────────────────────────────────┘ │
+└──────────────────────────────────────┘
+```
+
+### Workflow
+
+#### Step 1 – Select a measurement table
+
+The widget operates on tables produced by the **Intensity Measurement** or **Morphology
+Measurement** widgets in the same napari session.
+
+1. Run one of the measurement widgets first.
+2. Click **Refresh** to populate the **Table** dropdown with all available tables.
+3. Select the desired table from the dropdown.  The table is displayed and the
+   **Column** dropdown is filled with its numeric columns (excluding `label`).
+
+#### Step 2 – Explore the histogram
+
+The **Column histogram** section shows the distribution of the currently selected column.
+Threshold lines are drawn in red so you can evaluate the split visually before applying
+it.
 
 > **Note:** The histogram requires `matplotlib`.  Install it with
 > `pip install matplotlib` if it is not already available.
 
-### Step 3 – Categorize Segments (optional)
-
-Segments can be grouped into named categories based on one or more intensity thresholds.
+#### Step 3 – Set thresholds and categorize
 
 1. Set **Number of categories** (2–10).  The threshold and name fields update
    automatically.
@@ -174,8 +276,9 @@ Segments can be grouped into named categories based on one or more intensity thr
    selected column.  The threshold lines on the histogram update in real time.
 3. Optionally rename each category in the **Name** fields (defaults:
    `category_1`, `category_2`, …).
-4. Enter an **Output layer** name (default: `categories`).
-5. Click **Categorize**.
+4. Select the **Segmentation** layer to use for the output label layer.
+5. Enter an **Output layer** name (default: `categories`).
+6. Click **Categorize**.
 
 Two things happen:
 

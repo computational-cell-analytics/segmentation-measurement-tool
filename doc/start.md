@@ -3,7 +3,9 @@
 `segmentation-measurement` is a Python library for post-processing, measuring, and analyzing instance segmentations from microscopy images. It provides:
 
 - **Post-processing**: filter small segments, remove small holes, compute ring-masks around segments.
-- **Intensity measurements**: per-object mean, median, max, standard deviation, and percentile statistics; threshold-based categorization of objects by intensity.
+- **Intensity measurements**: per-object mean, median, max, standard deviation, and percentile statistics.
+- **Morphology measurements**: per-object area/volume, perimeter/surface area, sphericity, solidity, axis lengths, and equivalent diameter; supports anisotropic pixel/voxel sizes.
+- **Threshold analysis**: categorize objects into named groups based on any measurement column using automatic or manual thresholds.
 - **Napari plugin**: interactive widgets for all of the above, with table visualization and export to CSV, TSV, and Excel.
 - **CLI**: command-line interface for all functionality.
 

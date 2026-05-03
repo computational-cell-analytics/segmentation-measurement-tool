@@ -1,7 +1,8 @@
 # Command Line Interface
 
-The `segmentation-measurement` CLI provides utilities for post-processing segmentations and
-measuring intensities directly from the terminal without writing any Python code.
+The `segmentation-measurement` CLI provides utilities for post-processing segmentations,
+computing measurements, and analyzing results directly from the terminal without writing
+any Python code.
 
 ## Installation
 
@@ -13,19 +14,21 @@ After installation the `segmentation-measurement` command is available in your s
 
 ## Overview
 
-The CLI exposes two top-level commands:
+The CLI exposes three top-level commands:
 
 | Command | Description |
 |---------|-------------|
 | `postprocess` | Apply post-processing operations to segmentation TIFF files |
-| `measure` | Compute per-segment measurements from segmentation and intensity TIFF files |
+| `measure` | Compute per-segment measurements from segmentation TIFF files |
+| `analyze` | Analyze measurement tables (threshold-based categorization) |
 
 Run any command with `--help` to see its full usage:
 
 ```bash
 segmentation-measurement --help
 segmentation-measurement postprocess --help
-segmentation-measurement postprocess filter-small-segments --help
+segmentation-measurement measure morphology --help
+segmentation-measurement analyze threshold --help
 ```
 
 ---
@@ -126,7 +129,7 @@ segmentation-measurement postprocess ring-mask \
 
 ---
 
-## Intensity Measurement (`measure`)
+## Measurements (`measure`)
 
 ### `intensities`
 
@@ -178,4 +181,157 @@ segmentation-measurement measure intensities \
     --segmentation cells.tif \
     --intensity    gfp_channel.tif \
     --output       intensity_stats.xlsx
+```
+
+---
+
+### `morphology`
+
+Compute per-segment shape descriptors from a segmentation label image.  Supports
+isotropic and anisotropic pixel/voxel sizes so that results are returned in physical
+units.
+
+```bash
+segmentation-measurement measure morphology \
+    --segmentation segmentation.tif \
+    --output       morphology.csv
+```
+
+**Arguments**
+
+| Argument | Type | Required | Description |
+|----------|------|----------|-------------|
+| `--segmentation` | path | yes | Segmentation TIFF file (integer labels) |
+| `--output` | path | yes | Output table file; format inferred from extension |
+| `--scale` | float(s) | no | Physical pixel/voxel size (default: `1.0`) |
+
+**Scale argument**
+
+Pass a single value for isotropic spacing, or one value per spatial dimension for
+anisotropic spacing.  Dimension order is `(Y, X)` for 2-D and `(Z, Y, X)` for 3-D.
+
+```bash
+# isotropic: 0.5 µm per pixel
+--scale 0.5
+
+# anisotropic 2-D: 0.5 µm in Y, 0.25 µm in X
+--scale 0.5 0.25
+
+# anisotropic 3-D: 2.0 µm in Z, 0.5 µm in Y and X
+--scale 2.0 0.5 0.5
+```
+
+**Output columns – 2-D**
+
+| Column | Description |
+|--------|-------------|
+| `label` | Integer segment label |
+| `area` | Area in physical units |
+| `perimeter` | Perimeter length in physical units |
+| `sphericity` | Circularity (1.0 = perfect circle) |
+| `solidity` | Area / convex hull area |
+| `axis_major_length` | Major axis of the fitted ellipse |
+| `axis_minor_length` | Minor axis of the fitted ellipse |
+| `equivalent_diameter` | Diameter of a circle with the same area |
+
+**Output columns – 3-D**
+
+| Column | Description |
+|--------|-------------|
+| `label` | Integer segment label |
+| `volume` | Volume in physical units |
+| `surface_area` | Surface area via marching cubes |
+| `sphericity` | Sphericity (1.0 = perfect sphere) |
+| `solidity` | Volume / convex hull volume |
+| `axis_major_length` | Major axis of the fitted ellipsoid |
+| `axis_minor_length` | Minor axis of the fitted ellipsoid |
+| `equivalent_diameter` | Diameter of a sphere with the same volume |
+
+**Examples**
+
+```bash
+# 2-D, pixel units
+segmentation-measurement measure morphology \
+    --segmentation cells.tif --output morphology.csv
+
+# 2-D, anisotropic scale
+segmentation-measurement measure morphology \
+    --segmentation cells.tif --output morphology.csv --scale 0.5 0.25
+
+# 3-D, anisotropic scale (Z=2 µm, Y=X=0.5 µm)
+segmentation-measurement measure morphology \
+    --segmentation nuclei_3d.tif --output morphology_3d.csv --scale 2.0 0.5 0.5
+```
+
+---
+
+## Analysis (`analyze`)
+
+### `threshold`
+
+Categorize segments into N named groups based on N-1 thresholds applied to one column of
+a measurement table.  Thresholds can be provided explicitly or suggested automatically
+from the data distribution.
+
+```bash
+segmentation-measurement analyze threshold \
+    --table      measurements.csv \
+    --column     mean_intensity \
+    --n-categories 3 \
+    --output     categorized.csv
+```
+
+**Arguments**
+
+| Argument | Type | Required | Description |
+|----------|------|----------|-------------|
+| `--table` | path | yes | Input measurement table (CSV, TSV, or XLSX) |
+| `--column` | str | yes | Column name to threshold |
+| `--n-categories` | int | yes | Number of output categories |
+| `--thresholds` | float(s) | no | Explicit threshold values (`n_categories - 1` values); auto-suggested if omitted |
+| `--category-names` | str(s) | no | Names for each category (`n_categories` values); defaults to `category_1`, `category_2`, … |
+| `--output` | path | yes | Output table file (CSV, TSV, or XLSX) |
+| `--segmentation` | path | no | Segmentation TIFF; required when `--output-segmentation` is used |
+| `--output-segmentation` | path | no | Output TIFF where each segment is assigned its category ID |
+
+**Output**
+
+The output table is the input table with two additional columns:
+
+| Column | Description |
+|--------|-------------|
+| `category_id` | Integer category (1-based) |
+| `category_name` | Human-readable category name |
+
+Segments with a value below the first threshold are category 1; segments between the
+first and second threshold are category 2; and so on.
+
+**Examples**
+
+```bash
+# Auto-suggest thresholds for 3 categories
+segmentation-measurement analyze threshold \
+    --table intensity.csv \
+    --column mean_intensity \
+    --n-categories 3 \
+    --output categorized.csv
+
+# Explicit thresholds with custom names
+segmentation-measurement analyze threshold \
+    --table morphology.csv \
+    --column area \
+    --n-categories 3 \
+    --thresholds 500 1500 \
+    --category-names small medium large \
+    --output categorized.csv
+
+# Also write a category segmentation TIFF
+segmentation-measurement analyze threshold \
+    --table intensity.csv \
+    --column mean_intensity \
+    --n-categories 2 \
+    --thresholds 100 \
+    --output categorized.csv \
+    --segmentation cells.tif \
+    --output-segmentation categories.tif
 ```
