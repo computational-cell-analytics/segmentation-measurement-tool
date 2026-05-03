@@ -76,10 +76,7 @@ jobs:
             libxcb-randr0 \
             libxcb-render-util0 \
             libxcb-xinerama0 \
-            libxcb-xfixes0 \
-            libopengl0 \
-            libgles2-mesa-dev \
-            mesa-utils
+            libxcb-xfixes0
 
       - name: Install package (with napari and test dependencies)
         run: pip install -e ".[napari,test]" PyQt5
@@ -87,6 +84,5 @@ jobs:
       - name: Run GUI tests
         env:
           QT_QPA_PLATFORM: offscreen
-          LIBGL_ALWAYS_SOFTWARE: "1"
           PYTHONFAULTHANDLER: "1"
         run: pytest tests/test_widget.py tests/test_intensity_widget.py
