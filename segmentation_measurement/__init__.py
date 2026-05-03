@@ -1,4 +1,8 @@
-"""Segmentation measurement tools for microscopy image analysis."""
+"""
+.. include:: ../doc/start.md
+.. include:: ../doc/napari.md
+.. include:: ../doc/cli.md
+"""
 
 from segmentation_measurement.postprocessing import (
     compute_ring_mask,
