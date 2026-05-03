@@ -5,6 +5,11 @@ contributions:
     - id: segmentation-measurement.postprocessing_widget
       python_name: segmentation_measurement._widget:PostprocessingWidget
       title: Postprocessing
+    - id: segmentation-measurement.intensity_widget
+      python_name: segmentation_measurement._intensity_widget:IntensityWidget
+      title: Intensity Measurement
   widgets:
     - command: segmentation-measurement.postprocessing_widget
       display_name: Postprocessing
+    - command: segmentation-measurement.intensity_widget
+      display_name: Intensity Measurement

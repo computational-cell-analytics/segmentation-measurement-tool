@@ -35,6 +35,20 @@ def cmd_ring_mask(args):
     _save_segmentation(result, args.output)
 
 
+def cmd_measure_intensities(args):
+    import pandas as pd
+    from segmentation_measurement.intensity import measure_intensities
+    seg = _load_segmentation(args.segmentation)
+    intensity = tifffile.imread(args.intensity)
+    df = measure_intensities(seg, intensity)
+    if args.output.endswith(".xlsx"):
+        df.to_excel(args.output, index=False)
+    elif args.output.endswith(".tsv"):
+        df.to_csv(args.output, sep="\t", index=False)
+    else:
+        df.to_csv(args.output, index=False)
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="segmentation-measurement",
@@ -82,6 +96,26 @@ def main():
         help="Width of the ring in pixels/voxels.",
     )
     rm.set_defaults(func=cmd_ring_mask)
+
+    meas_parser = subparsers.add_parser("measure", help="Measurement utilities.")
+    meas_subparsers = meas_parser.add_subparsers(dest="subcommand")
+    meas_subparsers.required = True
+
+    int_meas = meas_subparsers.add_parser(
+        "intensities",
+        help="Compute per-segment intensity statistics.",
+    )
+    int_meas.add_argument(
+        "--segmentation", required=True, help="Segmentation TIFF file."
+    )
+    int_meas.add_argument(
+        "--intensity", required=True, help="Intensity image TIFF file."
+    )
+    int_meas.add_argument(
+        "--output", required=True,
+        help="Output table file (CSV by default; TSV or XLSX by extension).",
+    )
+    int_meas.set_defaults(func=cmd_measure_intensities)
 
     args = parser.parse_args()
     args.func(args)

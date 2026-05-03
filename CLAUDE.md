@@ -4,9 +4,9 @@ The goal of this repository is to provide common functionality for post-processi
 
 Specifically, the goal is to provide the following functionality:
 - A utility for post-processing segmentations, such as size filtering, filling small holes, and computing a ring-mask across segments.
-- A utility for measuring morphology, such as area / volume, surface, sphericity, etc.
 - A utility for measuring intensities.
 - A utility for measuring cell to nucleus intensity ratios and related measures.
+- A utility for measuring morphology, such as area / volume, surface, sphericity, etc.
 
 For each utility the following entrypoints should be provided:
 - A python function in the `segmentation_measurement` python library.
@@ -35,5 +35,18 @@ Implementation guide:
 - In the CLI it should be a single top-level command that has individual sub-commands per functionality.
 - In napari it should be a single widget that enables running the different post-processing methods with a specified input segmentation and (new) output segmentation. If input and output segmentation are the same the input segmentation should be post-processed in place.
 
+## Intensity measurement widget
+
+Takes as input a segmentation and an intensity image.
+
+Should implement the following functionality:
+- Computing intensity measurements: the mean, median, max, standard deviation and reasonable percentiles. Use skimage regionprops and represent the results as a pandas dataframe.
+- Separating the cells into N different categories based on N-1 thresholds with respect to one of the measurements, e.g. 3 categories based on the mean intensity. The function should take the dataframe from the previous function as input.
+- A function to suggest the thresholds for the N categories and a given column based on a suitable heuristics.
+
+The napari plugin should provide these three features so that:
+- Users can first select image and segmentation to measure the per object intensity table.
+- The table and a histogram of a selected column are displayed in the widget. 
+- The user can then either enter the number of categories and corresponding thresholds or just the number of categories and derive the thresholds via the heuristics. Categories can be named. It should be possible to modify the suggested thresholds; they should be shown in the histogram. The output should be a new segmentation layer that gives objects the category id and a new column in the intensity table with the category ID and name.
 
 Implementation details on other functionality will follow.
