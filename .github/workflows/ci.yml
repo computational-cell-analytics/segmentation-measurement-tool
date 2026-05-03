@@ -73,6 +73,9 @@ jobs:
       - name: Install package (with napari)
         run: pip install -e ".[napari]"
 
+      - name: Install QT
+        run: pip install PyQt5
+
       - name: Run all tests
         env:
           QT_QPA_PLATFORM: offscreen
