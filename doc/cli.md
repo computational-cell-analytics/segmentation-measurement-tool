@@ -20,7 +20,7 @@ The CLI exposes three top-level commands:
 |---------|-------------|
 | `postprocess` | Apply post-processing operations to segmentation TIFF files |
 | `measure` | Compute per-segment measurements from segmentation TIFF files |
-| `analyze` | Analyze measurement tables (threshold-based categorization) |
+| `analyze` | Analyze measurement tables (threshold-based categorization, clustering) |
 
 Run any command with `--help` to see its full usage:
 
@@ -359,6 +359,85 @@ segmentation-measurement measure cell-nucleus \
 ---
 
 ## Analysis (`analyze`)
+
+### `cluster`
+
+Cluster segments using their measurement features.  All numeric columns are used as
+features (excluding `label`, `cluster_id`, `category_id`, and `category_name`).
+Features are z-score standardised before clustering.
+
+The output table is the input table with an added `cluster_id` column.  Cluster IDs are
+**1-based** (1, 2, 3, …).  Noise points — segments that no cluster claims, as produced by
+DBSCAN and HDBSCAN — are assigned `cluster_id = -1`.
+
+```bash
+segmentation-measurement analyze cluster \
+    --table      measurements.csv \
+    --method     kmeans \
+    --n-clusters 4 \
+    --output     clustered.csv
+```
+
+**Arguments**
+
+| Argument | Type | Required | Description |
+|----------|------|----------|-------------|
+| `--table` | path | yes | Input measurement table (CSV, TSV, or XLSX) |
+| `--method` | str | no | Clustering method: `kmeans` (default), `dbscan`, `hdbscan`, or `mean_shift` |
+| `--n-clusters` | int | no | K-Means: number of clusters (default: 3) |
+| `--eps` | float | no | DBSCAN: neighbourhood radius (default: 0.5) |
+| `--min-samples` | int | no | DBSCAN / HDBSCAN: minimum samples in a neighbourhood (default: 5) |
+| `--min-cluster-size` | int | no | HDBSCAN: minimum cluster size (default: 5) |
+| `--bandwidth` | float | no | Mean Shift: bandwidth; omit or set to 0 for automatic estimation |
+| `--output` | path | yes | Output table file (CSV, TSV, or XLSX) |
+| `--segmentation` | path | no | Segmentation TIFF; required when `--output-segmentation` is used |
+| `--output-segmentation` | path | no | Output TIFF where each segment is painted with its `cluster_id`; noise segments are left as background (0) |
+
+**Output**
+
+The output table is the input table with one additional column:
+
+| Column | Description |
+|--------|-------------|
+| `cluster_id` | Integer cluster label (1-based); `-1` for noise (DBSCAN / HDBSCAN only) |
+
+When `--output-segmentation` is specified, each segment pixel is set to the `cluster_id`
+of that segment (background and noise segments remain 0).
+
+**Method defaults**
+
+| Method | Key parameters and defaults |
+|--------|----------------------------|
+| `kmeans` | `--n-clusters 3` |
+| `dbscan` | `--eps 0.5`, `--min-samples 5` |
+| `hdbscan` | `--min-cluster-size 5` |
+| `mean_shift` | bandwidth estimated automatically |
+
+**Examples**
+
+```bash
+# K-Means with 5 clusters
+segmentation-measurement analyze cluster \
+    --table morphology.csv --method kmeans --n-clusters 5 --output clustered.csv
+
+# DBSCAN – also write a cluster segmentation TIFF
+segmentation-measurement analyze cluster \
+    --table intensity.csv \
+    --method dbscan --eps 1.0 --min-samples 3 \
+    --output clustered.csv \
+    --segmentation cells.tif \
+    --output-segmentation clusters.tif
+
+# HDBSCAN
+segmentation-measurement analyze cluster \
+    --table morphology.csv --method hdbscan --min-cluster-size 10 --output clustered.csv
+
+# Mean Shift with automatic bandwidth
+segmentation-measurement analyze cluster \
+    --table intensity.csv --method mean_shift --output clustered.csv
+```
+
+---
 
 ### `threshold`
 

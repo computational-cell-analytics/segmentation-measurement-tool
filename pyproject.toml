@@ -12,6 +12,7 @@ dependencies = [
     "numpy",
     "scipy",
     "scikit-image",
+    "scikit-learn",
     "pandas",
     "tifffile",
 ]
@@ -23,6 +24,7 @@ napari = [
     "npe2",
     "qtpy",
     "matplotlib",
+    "umap-learn",
 ]
 test = [
     "pytest",

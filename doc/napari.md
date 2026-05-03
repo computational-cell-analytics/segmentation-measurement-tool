@@ -26,6 +26,8 @@ Open any widget from the napari menu:
 
 **Plugins → Segmentation Measurement → Cell-Nucleus Measurement → Cell-Nucleus Measurement**
 
+**Plugins → Segmentation Measurement → Clustering Analysis → Clustering Analysis**
+
 All widgets appear as dockable panels that can be placed anywhere in the napari window.
 
 ---
@@ -135,8 +137,8 @@ The **Measurements** table is filled with one row per segment.  The columns are:
 | `percentile_75` | 75th percentile (Q3) |
 | `percentile_90` | 90th percentile |
 
-The table is also registered internally so that the **Threshold Analysis** widget can
-access it directly (see below).
+The table is also registered internally so that the **Threshold Analysis** and
+**Clustering Analysis** widgets can access it directly (see below).
 
 ### Saving the table
 
@@ -210,8 +212,8 @@ The **Measurements** table is filled with one row per segment.
 | `axis_minor_length` | Length of the minor axis of the fitted ellipsoid |
 | `equivalent_diameter` | Diameter of a sphere with the same volume |
 
-The table is also registered internally so that the **Threshold Analysis** widget can
-access it directly.
+The table is also registered internally so that the **Threshold Analysis** and
+**Clustering Analysis** widgets can access it directly.
 
 ### Saving the table
 
@@ -364,10 +366,110 @@ When an intensity image is selected, columns are added for each statistic `{stat
 | `nucleus_{stat}_intensity` | Statistic over all nuclear pixels within this cell |
 | `{stat}_intensity_ratio` | `cell_{stat}_intensity / nucleus_{stat}_intensity`; `NaN` when either region is empty or the nucleus value is zero |
 
-The table is also registered internally so that the **Threshold Analysis** widget can
-access it directly.
+The table is also registered internally so that the **Threshold Analysis** and
+**Clustering Analysis** widgets can access it directly.
 
 ### Saving the table
 
 Click **Save table** to export the measurements (same formats as Intensity Measurement:
 CSV, TSV, Excel).
+
+---
+
+## Clustering Analysis Widget
+
+The Clustering Analysis widget groups segments into clusters based on all numeric columns
+in a previously computed measurement table.  After clustering, a 2-D feature-reduction
+scatter plot visualises the result, and a new label layer is created where each segment is
+painted with its cluster ID.  The scatter-plot colours and the label-layer colours are
+kept in sync.
+
+### Layout (scrollable)
+
+```
+┌──────────────────────────────────────┐
+│ ┌ Measurement table ───────────────┐ │
+│ │ Table: [combo]  [Refresh]        │ │
+│ │  <table>  [Save table]           │ │
+│ └──────────────────────────────────┘ │
+│ Segmentation: [combo]                │
+│ ┌ Feature reduction ───────────────┐ │
+│ │ Method: [UMAP▾]  [Reduce]        │ │
+│ │  <2-D scatter plot>              │ │
+│ └──────────────────────────────────┘ │
+│ ┌ Clustering ──────────────────────┐ │
+│ │ Method: [K-Means▾]               │ │
+│ │  <method-specific parameters>    │ │
+│ │ Output layer: [edit]             │ │
+│ │ [Cluster]                        │ │
+│ └──────────────────────────────────┘ │
+└──────────────────────────────────────┘
+```
+
+### Workflow
+
+#### Step 1 – Select a measurement table
+
+The widget operates on tables produced by the **Intensity Measurement**,
+**Morphology Measurement**, or **Cell-Nucleus Measurement** widgets in the same napari
+session.
+
+1. Run one of the measurement widgets first.
+2. Click **Refresh** to populate the **Table** dropdown with all available tables.
+3. Select the desired table.  The table is displayed in the widget.
+
+#### Step 2 – Explore the feature space (optional)
+
+1. Choose a **Feature reduction** method: **UMAP** (default), **TSNE**, or **PCA**.
+2. Click **Reduce** to compute a 2-D embedding of the features and display an uncoloured
+   scatter plot.
+
+> **Note:** UMAP requires the optional `umap-learn` package
+> (`pip install umap-learn`).  If it is not installed the widget falls back to PCA
+> automatically.  Changing the reduction method clears the cached embedding so the next
+> **Reduce** or **Cluster** call recomputes it.
+
+#### Step 3 – Cluster
+
+1. Select a **Clustering method** from the dropdown (see table below).
+2. Adjust the method-specific parameters shown below the dropdown.
+3. Enter an **Output layer** name (default: `clusters`).
+4. Select the **Segmentation** layer to use for the output.
+5. Click **Cluster**.
+
+Three things happen simultaneously:
+
+* The measurements table gains a new `cluster_id` column (1-based; `-1` for noise).
+* The scatter plot is redrawn with each point coloured by its cluster.
+* A new Labels layer is created (or updated) where each segment is painted with its
+  `cluster_id`.  The layer colours are set to **exactly match** the scatter-plot colours.
+
+If you re-run clustering, the existing `cluster_id` column is excluded from the feature
+set so it does not affect the new result.
+
+#### Clustering methods and parameters
+
+| Method | Widget label | Key parameters (defaults) |
+|--------|-------------|--------------------------|
+| scikit-learn KMeans | **K-Means** | **N clusters** (3) |
+| scikit-learn DBSCAN | **DBSCAN** | **Eps** (0.5), **Min samples** (5) |
+| scikit-learn HDBSCAN | **HDBSCAN** | **Min cluster size** (5) |
+| scikit-learn MeanShift | **Mean Shift** | **Bandwidth** (0 = auto) |
+
+#### Cluster IDs and label values
+
+Cluster IDs are **1-based**: the first cluster found is 1, the second is 2, and so on.
+Segments that are classified as noise by DBSCAN or HDBSCAN receive `cluster_id = -1` and
+remain as background (0) in the output label layer.
+
+#### Color matching
+
+The widget uses matplotlib's `tab10` (or `tab20` when there are more than 10 clusters)
+colormap to assign one colour per cluster.  The same colour array is applied to the
+Labels layer via `DirectLabelColormap`, so the scatter-plot legend and the segmentation
+overlay always show identical colours.
+
+### Saving the table
+
+Click **Save table** to export the measurements with the cluster column (CSV, TSV, or
+Excel).
