@@ -17,9 +17,11 @@ Tests for the python fucntion and CLI should be written with `unittest`.
 
 The library should be pip-installable, the functionality should be implemented with skimage, scipy, pandas and other standard scientific python libraries. All functions should support 2D and 3D inputs (or arbitrary dimensionality if possible).
 
-All python functions should be documented with doc strings according to google convention, and the code should be PEP8 compliant.
+All python functions should be documented with doc strings according to google convention, and the code should be PEP8 compliant. All functions that have a doc-string should use type annotations.
 
 The napari plugin should support visualizing the measurements as tables and support saving these to excel, csv, tsv, and other relevant formats.
+
+The documentation should be build with pdoc. It should contain separate and detailed sections that document how the command line utility and the napari plugin are used.
 
 Below are details on the plugins to implement.
 

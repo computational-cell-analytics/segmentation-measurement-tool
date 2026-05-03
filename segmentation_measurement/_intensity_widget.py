@@ -1,6 +1,9 @@
 """Napari widget for intensity measurements."""
 
+from __future__ import annotations
+
 import numpy as np
+import pandas as pd
 import napari
 from qtpy.QtWidgets import (
     QComboBox,
@@ -23,12 +26,12 @@ from qtpy.QtWidgets import (
 class IntensityWidget(QWidget):
     """Widget for measuring per-segment intensities and categorizing by threshold."""
 
-    def __init__(self, viewer: napari.Viewer):
+    def __init__(self, viewer: napari.Viewer) -> None:
         super().__init__()
         self._viewer = viewer
-        self._measurements = None
-        self._threshold_spins = []
-        self._name_edits = []
+        self._measurements: pd.DataFrame | None = None
+        self._threshold_spins: list[QDoubleSpinBox] = []
+        self._name_edits: list[QLineEdit] = []
         self._hist_fig = None
         self._hist_ax = None
         self._hist_canvas = None
@@ -37,7 +40,7 @@ class IntensityWidget(QWidget):
         self._viewer.layers.events.removed.connect(self._update_layer_combos)
         self._update_layer_combos()
 
-    def _setup_ui(self):
+    def _setup_ui(self) -> None:
         outer_layout = QVBoxLayout()
         self.setLayout(outer_layout)
 
@@ -130,7 +133,7 @@ class IntensityWidget(QWidget):
 
         self._rebuild_threshold_widgets()
 
-    def _make_histogram_canvas(self):
+    def _make_histogram_canvas(self) -> QWidget:
         try:
             from matplotlib.figure import Figure
             try:
@@ -145,7 +148,7 @@ class IntensityWidget(QWidget):
         except ImportError:
             return QLabel("Install matplotlib for histogram display.")
 
-    def _rebuild_threshold_widgets(self):
+    def _rebuild_threshold_widgets(self) -> None:
         while self._threshold_layout.count():
             item = self._threshold_layout.takeAt(0)
             if item.widget():
@@ -179,7 +182,7 @@ class IntensityWidget(QWidget):
             row_widget.setLayout(row)
             self._threshold_layout.addWidget(row_widget)
 
-    def _update_layer_combos(self, event=None):
+    def _update_layer_combos(self, event: object = None) -> None:
         from napari.layers import Image, Labels
         label_layers = [
             layer.name for layer in self._viewer.layers if isinstance(layer, Labels)
@@ -200,7 +203,7 @@ class IntensityWidget(QWidget):
         if current_img in image_layers:
             self._img_combo.setCurrentText(current_img)
 
-    def _run_measurement(self):
+    def _run_measurement(self) -> None:
         from segmentation_measurement.intensity import measure_intensities
         seg_name = self._seg_combo.currentText()
         img_name = self._img_combo.currentText()
@@ -212,7 +215,7 @@ class IntensityWidget(QWidget):
         self._update_table()
         self._update_col_combo()
 
-    def _update_table(self):
+    def _update_table(self) -> None:
         if self._measurements is None:
             return
         df = self._measurements
@@ -225,7 +228,7 @@ class IntensityWidget(QWidget):
                 self._table.setItem(row_idx, col_idx, QTableWidgetItem(text))
         self._table.resizeColumnsToContents()
 
-    def _update_col_combo(self):
+    def _update_col_combo(self) -> None:
         if self._measurements is None:
             return
         numeric_cols = [
@@ -241,7 +244,7 @@ class IntensityWidget(QWidget):
         self._col_combo.blockSignals(False)
         self._update_histogram()
 
-    def _update_histogram(self):
+    def _update_histogram(self) -> None:
         if self._hist_ax is None or self._measurements is None:
             return
         col = self._col_combo.currentText()
@@ -258,7 +261,7 @@ class IntensityWidget(QWidget):
         self._hist_fig.tight_layout()
         self._hist_canvas.draw()
 
-    def _suggest_thresholds(self):
+    def _suggest_thresholds(self) -> None:
         from segmentation_measurement.intensity import suggest_thresholds
         if self._measurements is None:
             return
@@ -273,7 +276,7 @@ class IntensityWidget(QWidget):
             spin.blockSignals(False)
         self._update_histogram()
 
-    def _run_categorization(self):
+    def _run_categorization(self) -> None:
         from segmentation_measurement.intensity import categorize_by_intensity
         if self._measurements is None:
             return
@@ -305,7 +308,7 @@ class IntensityWidget(QWidget):
         else:
             self._viewer.add_labels(result, name=out_name)
 
-    def _save_table(self):
+    def _save_table(self) -> None:
         if self._measurements is None:
             return
         path, _ = QFileDialog.getSaveFileName(

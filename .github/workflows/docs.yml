@@ -1,0 +1,112 @@
+name: Docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "segmentation_measurement/**"
+      - "doc/**"
+      - "pyproject.toml"
+  # Allow triggering manually from the Actions tab
+  workflow_dispatch:
+
+# Allow this workflow to deploy to GitHub Pages
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Only one deployment at a time; cancel in-progress runs for the same branch
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build documentation
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-docs-${{ hashFiles('pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-docs-
+
+      - name: Install package and docs dependencies
+        run: pip install -e ".[docs]"
+
+      - name: Build API documentation with pdoc
+        run: |
+          pdoc segmentation_measurement \
+               --docformat google \
+               --output-dir _site
+
+      - name: Convert user guides to HTML
+        run: |
+          python - << 'PYEOF'
+          import markdown
+          from pathlib import Path
+
+          STYLE = """
+          <style>
+            body { font-family: sans-serif; max-width: 860px; margin: 2rem auto; padding: 0 1rem; }
+            pre { background: #f5f5f5; padding: 1rem; overflow-x: auto; border-radius: 4px; }
+            code { background: #f5f5f5; padding: .1em .3em; border-radius: 3px; }
+            pre code { background: none; padding: 0; }
+            table { border-collapse: collapse; width: 100%; }
+            th, td { border: 1px solid #ddd; padding: .5rem .75rem; text-align: left; }
+            th { background: #f0f0f0; }
+            a { color: #0366d6; }
+            nav { margin-bottom: 2rem; }
+          </style>
+          """
+          NAV = """
+          <nav>
+            <a href="index.html">API Reference</a> |
+            <a href="cli.html">CLI Guide</a> |
+            <a href="napari.html">Napari Plugin Guide</a>
+          </nav>
+          """
+
+          site = Path("_site")
+          site.mkdir(exist_ok=True)
+
+          exts = ["tables", "fenced_code", "codehilite"]
+          for src in Path("doc").glob("*.md"):
+              body = markdown.markdown(src.read_text(), extensions=exts)
+              title = src.stem.replace("_", " ").title()
+              html = (
+                  f"<!DOCTYPE html>\n<html lang='en'>\n<head>\n"
+                  f"<meta charset='utf-8'>\n<title>{title} – segmentation-measurement</title>\n"
+                  f"{STYLE}\n</head>\n<body>\n{NAV}\n{body}\n</body>\n</html>\n"
+              )
+              (site / (src.stem + ".html")).write_text(html)
+              print(f"Converted {src} -> _site/{src.stem}.html")
+          PYEOF
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

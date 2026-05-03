@@ -24,6 +24,10 @@ napari = [
     "qtpy",
     "matplotlib",
 ]
+docs = [
+    "pdoc",
+    "markdown",
+]
 
 [project.entry-points."console_scripts"]
 segmentation-measurement = "segmentation_measurement._cli:main"

@@ -1,11 +1,13 @@
 """Post-processing utilities for instance segmentations."""
 
+from __future__ import annotations
+
 import numpy as np
 from scipy.ndimage import binary_dilation
 from skimage.morphology import remove_small_holes as _remove_small_holes
 
 
-def filter_small_segments(segmentation, min_size):
+def filter_small_segments(segmentation: np.ndarray, min_size: int) -> np.ndarray:
     """Filter out segments below a minimum size threshold.
 
     Segments with fewer pixels/voxels than ``min_size`` are set to zero
@@ -32,7 +34,7 @@ def filter_small_segments(segmentation, min_size):
     return result
 
 
-def remove_small_holes(segmentation, max_hole_size):
+def remove_small_holes(segmentation: np.ndarray, max_hole_size: int) -> np.ndarray:
     """Remove small holes from segments.
 
     For each segment, enclosed background regions (holes) smaller than or
@@ -63,7 +65,7 @@ def remove_small_holes(segmentation, max_hole_size):
     return result
 
 
-def compute_ring_mask(segmentation, ring_width):
+def compute_ring_mask(segmentation: np.ndarray, ring_width: int) -> np.ndarray:
     """Compute the ring mask around each segment.
 
     For each segment, a ring of specified width is computed by dilating the

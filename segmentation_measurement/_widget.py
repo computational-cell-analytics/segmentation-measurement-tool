@@ -1,5 +1,7 @@
 """Napari plugin widget for post-processing."""
 
+from __future__ import annotations
+
 import napari
 from qtpy.QtWidgets import (
     QComboBox,
@@ -17,7 +19,7 @@ from qtpy.QtWidgets import (
 class PostprocessingWidget(QWidget):
     """Widget for applying post-processing operations to segmentation layers."""
 
-    def __init__(self, viewer: napari.Viewer):
+    def __init__(self, viewer: napari.Viewer) -> None:
         super().__init__()
         self._viewer = viewer
         self._setup_ui()
@@ -25,7 +27,7 @@ class PostprocessingWidget(QWidget):
         self._viewer.layers.events.removed.connect(self._update_layer_combos)
         self._update_layer_combos()
 
-    def _setup_ui(self):
+    def _setup_ui(self) -> None:
         layout = QVBoxLayout()
         self.setLayout(layout)
 
@@ -92,10 +94,10 @@ class PostprocessingWidget(QWidget):
         self._run_btn.clicked.connect(self._run)
         layout.addWidget(self._run_btn)
 
-    def _on_method_changed(self, index):
+    def _on_method_changed(self, index: int) -> None:
         self._params_stack.setCurrentIndex(index)
 
-    def _update_layer_combos(self, event=None):
+    def _update_layer_combos(self, event: object = None) -> None:
         from napari.layers import Labels
         label_layers = [
             layer.name for layer in self._viewer.layers if isinstance(layer, Labels)
@@ -115,7 +117,7 @@ class PostprocessingWidget(QWidget):
         if current_output:
             self._output_combo.setCurrentText(current_output)
 
-    def _run(self):
+    def _run(self) -> None:
         from segmentation_measurement.postprocessing import (
             compute_ring_mask,
             filter_small_segments,
