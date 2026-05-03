@@ -98,6 +98,50 @@ def cmd_analyze_cluster(args: argparse.Namespace) -> None:
         _save_segmentation(out, args.output_segmentation)
 
 
+def cmd_analyze_classify(args: argparse.Namespace) -> None:
+    """Execute the analyze-classify sub-command."""
+    from segmentation_measurement.analysis import apply_classifier
+    import joblib
+    df = load_table(args.table)
+    classifier = joblib.load(args.classifier)
+    class_names = list(args.class_names) if args.class_names else None
+    result = apply_classifier(df, classifier, class_names=class_names)
+    save_table(result, args.output)
+
+    if args.segmentation and args.output_segmentation:
+        seg = _load_segmentation(args.segmentation)
+        out = np.zeros_like(seg)
+        for label_id, cid in zip(result["label"].values, result["classification_id"].values):
+            if int(cid) > 0:
+                out[seg == int(label_id)] = int(cid)
+        _save_segmentation(out, args.output_segmentation)
+
+
+def cmd_analyze_train_classifier(args: argparse.Namespace) -> None:
+    """Execute the analyze-train-classifier sub-command."""
+    from segmentation_measurement.analysis import train_classifier
+    import joblib
+    frames = [load_table(p) for p in args.tables]
+    import pandas as pd
+    df = pd.concat(frames, ignore_index=True) if len(frames) > 1 else frames[0]
+    kwargs: dict = {}
+    if args.max_iter is not None:
+        kwargs["max_iter"] = args.max_iter
+    if args.c is not None:
+        kwargs["C"] = args.c
+    if args.n_estimators is not None:
+        kwargs["n_estimators"] = args.n_estimators
+    if args.max_depth is not None and args.max_depth > 0:
+        kwargs["max_depth"] = args.max_depth
+    classifier = train_classifier(
+        df,
+        annotation_column=args.annotation_column,
+        method=args.method,
+        **kwargs,
+    )
+    joblib.dump(classifier, args.output)
+
+
 def cmd_analyze_threshold(args: argparse.Namespace) -> None:
     """Execute the analyze-threshold sub-command."""
     from segmentation_measurement.analysis import (
@@ -321,6 +365,74 @@ def main() -> None:
         help="Output category segmentation TIFF file.",
     )
     thresh.set_defaults(func=cmd_analyze_threshold)
+
+    classify = analyze_subparsers.add_parser(
+        "classify",
+        help="Apply a trained classifier to a measurement table.",
+    )
+    classify.add_argument(
+        "--table", required=True,
+        help="Input measurement table (CSV, TSV, or XLSX).",
+    )
+    classify.add_argument(
+        "--classifier", required=True,
+        help="Path to a trained classifier saved with joblib (.joblib).",
+    )
+    classify.add_argument(
+        "--output", required=True,
+        help="Output table file with classification columns (CSV, TSV, or XLSX).",
+    )
+    classify.add_argument(
+        "--class-names", nargs="+", default=None,
+        help=(
+            "Names for each class in ascending class-label order "
+            "(e.g. --class-names typeA typeB typeC)."
+        ),
+    )
+    classify.add_argument(
+        "--segmentation", default=None,
+        help="Segmentation TIFF file (required for --output-segmentation).",
+    )
+    classify.add_argument(
+        "--output-segmentation", default=None,
+        help="Output classification segmentation TIFF file.",
+    )
+    classify.set_defaults(func=cmd_analyze_classify)
+
+    train_clf = analyze_subparsers.add_parser(
+        "train-classifier",
+        help="Train a classifier from annotated measurement tables.",
+    )
+    train_clf.add_argument(
+        "--tables", nargs="+", required=True,
+        help="One or more annotated measurement tables (CSV, TSV, or XLSX).",
+    )
+    train_clf.add_argument(
+        "--output", required=True,
+        help="Output classifier file (.joblib).",
+    )
+    train_clf.add_argument(
+        "--method",
+        default="random_forest",
+        choices=["logistic_regression", "random_forest"],
+        help="Classifier type (default: random_forest).",
+    )
+    train_clf.add_argument(
+        "--annotation-column", default="annotation",
+        help="Column containing integer annotation labels (default: annotation).",
+    )
+    train_clf.add_argument("--c", type=float, default=None, help="LR: regularisation strength C.")
+    train_clf.add_argument(
+        "--max-iter", type=int, default=None, help="LR: maximum number of iterations.",
+    )
+    train_clf.add_argument(
+        "--n-estimators", type=int, default=None, help="RF: number of trees.",
+    )
+    train_clf.add_argument(
+        "--max-depth", type=int, default=None,
+        help="RF: maximum tree depth (0 or omit for unlimited).",
+    )
+    train_clf.set_defaults(func=cmd_analyze_train_classifier)
 
     args = parser.parse_args()
     args.func(args)

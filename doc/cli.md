@@ -20,7 +20,7 @@ The CLI exposes three top-level commands:
 |---------|-------------|
 | `postprocess` | Apply post-processing operations to segmentation TIFF files |
 | `measure` | Compute per-segment measurements from segmentation TIFF files |
-| `analyze` | Analyze measurement tables (threshold-based categorization, clustering) |
+| `analyze` | Analyze measurement tables (threshold-based categorization, clustering, classification) |
 
 Run any command with `--help` to see its full usage:
 
@@ -506,4 +506,122 @@ segmentation-measurement analyze threshold \
     --output categorized.csv \
     --segmentation cells.tif \
     --output-segmentation categories.tif
+```
+
+---
+
+### `train-classifier`
+
+Train a random forest or logistic regression classifier from one or more annotated
+measurement tables and save the fitted pipeline to a `.joblib` file.
+
+An *annotated* table is a measurement table that contains an integer `annotation` column
+(or whichever column name you specify with `--annotation-column`).  Rows with a value of
+`0` in that column are treated as unannotated and excluded from training.  Annotated rows
+are typically exported from the **Classification Analysis** napari widget, but you can
+also create the column manually.
+
+All numeric columns are used as features (excluding `label`, `annotation`,
+`classification_id`, `classification_name`, `cluster_id`, `category_id`, and
+`category_name`).  Features are z-score standardised inside the saved pipeline so no
+separate pre-processing step is needed when applying the classifier.
+
+```bash
+segmentation-measurement analyze train-classifier \
+    --tables  annotated.csv \
+    --method  random_forest \
+    --output  classifier.joblib
+```
+
+**Arguments**
+
+| Argument | Type | Required | Description |
+|----------|------|----------|-------------|
+| `--tables` | path(s) | yes | One or more annotated measurement tables (CSV, TSV, or XLSX); when multiple files are given they are concatenated before training |
+| `--output` | path | yes | Output classifier file (`.joblib`) |
+| `--method` | str | no | Classifier type: `random_forest` (default) or `logistic_regression` |
+| `--annotation-column` | str | no | Column containing integer annotation labels (default: `annotation`) |
+| `--n-estimators` | int | no | RF: number of trees (default: 100) |
+| `--max-depth` | int | no | RF: maximum tree depth; omit or set to 0 for unlimited |
+| `--c` | float | no | LR: regularisation strength C (default: 1.0) |
+| `--max-iter` | int | no | LR: maximum number of solver iterations (default: 1000) |
+
+**Examples**
+
+```bash
+# Train a random forest from a single annotated CSV
+segmentation-measurement analyze train-classifier \
+    --tables annotated.csv \
+    --output classifier.joblib
+
+# Train from two experiments combined, with 200 trees
+segmentation-measurement analyze train-classifier \
+    --tables experiment1.csv experiment2.csv \
+    --n-estimators 200 \
+    --output classifier.joblib
+
+# Train a logistic regression classifier
+segmentation-measurement analyze train-classifier \
+    --tables annotated.csv \
+    --method logistic_regression \
+    --c 0.1 \
+    --output classifier.joblib
+```
+
+---
+
+### `classify`
+
+Apply a previously trained classifier (saved with `train-classifier` or exported from the
+napari widget) to a measurement table.  The output table gains two new columns:
+`classification_id` (1-based integer) and `classification_name` (string).
+
+```bash
+segmentation-measurement analyze classify \
+    --table      measurements.csv \
+    --classifier classifier.joblib \
+    --output     classified.csv
+```
+
+**Arguments**
+
+| Argument | Type | Required | Description |
+|----------|------|----------|-------------|
+| `--table` | path | yes | Input measurement table (CSV, TSV, or XLSX) |
+| `--classifier` | path | yes | Trained classifier file (`.joblib`) |
+| `--output` | path | yes | Output table file (CSV, TSV, or XLSX) |
+| `--class-names` | str(s) | no | Names for each class in ascending class-label order (e.g. `--class-names mitotic interphase`); defaults to `class_1`, `class_2`, … |
+| `--segmentation` | path | no | Segmentation TIFF; required when `--output-segmentation` is used |
+| `--output-segmentation` | path | no | Output TIFF where each segment is painted with its `classification_id`; unclassified segments remain background (0) |
+
+**Output columns**
+
+| Column | Description |
+|--------|-------------|
+| `classification_id` | Integer class label (1-based); 0 for rows whose features were all NaN |
+| `classification_name` | Human-readable class name |
+
+**Examples**
+
+```bash
+# Apply classifier and save results as CSV
+segmentation-measurement analyze classify \
+    --table new_measurements.csv \
+    --classifier classifier.joblib \
+    --output classified.csv
+
+# Apply and assign human-readable names to classes
+segmentation-measurement analyze classify \
+    --table new_measurements.csv \
+    --classifier classifier.joblib \
+    --class-names mitotic interphase apoptotic \
+    --output classified.csv
+
+# Also write a classification segmentation TIFF
+segmentation-measurement analyze classify \
+    --table new_measurements.csv \
+    --classifier classifier.joblib \
+    --output classified.csv \
+    --segmentation cells.tif \
+    --output-segmentation classified_seg.tif
 ```
