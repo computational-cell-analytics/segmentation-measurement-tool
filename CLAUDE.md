@@ -86,6 +86,8 @@ The napari plugin implements tis measurement logic as in the other measurement w
 
 The python functions take a pandas dataframe as input, the CLI the path to a saved table. The napari plugin widgets operate on a table that was produced by one of the measurement widgets.
 
+Make sure to use utility functions for shared functionality, like accessing the tables in napari.
+
 ## Filter
 
 Filter outliers from the table based on defined criteria. Not yet implemented.
@@ -104,7 +106,22 @@ The napari plugin works as follows:
 
 ## Clustering analysis
 
-Not yet implemented.
+This functionality operates on one of the measurements results (from above) and enables the following:
+- Apply clustering to the features in the table (excluding the label column).
+- Using one of these clustering methods: k-means, dbscan, hdbscan, mean shift (use sklearn implementations)
+
+For the python function and CLI: accept optional kwargs for the parameters of each clustering method and use the most reasonable defaults if not give.
+
+For the napari plugin:
+- The table (output from a measurement tool) can be selected, as for other analysis plugins.
+- Enable setting the values for the most important parameters for each clustering method, set reasonable defaults (same defaults as in python function / CLI).
+- Add a plot to the widget showing a 2D feature reduction of the features (UMAP, TSNE, PCA, can be selected, set to UMAP by default)
+- When applying the clustering, color the feature plot and a new output segmentation according to the cluster result, match the colors between cluster ids.
+- Also write the cluster ID to the table. In case clustering is re-run, make sure to exclude this column from the features for clustering.
+
+## Hierarchical clustering analysis
+
+Not yet implemented
 
 ## Classification analysis
 

@@ -14,6 +14,7 @@ from segmentation_measurement.morphology import measure_morphology
 from segmentation_measurement.cell_nucleus import measure_cell_nucleus
 from segmentation_measurement.analysis import (
     categorize_by_threshold,
+    cluster_measurements,
     suggest_thresholds,
 )
 
@@ -26,6 +27,7 @@ __all__ = [
     "measure_cell_nucleus",
     "suggest_thresholds",
     "categorize_by_threshold",
+    "cluster_measurements",
 ]
 
 __version__ = "0.1.0"

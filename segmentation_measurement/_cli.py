@@ -71,6 +71,33 @@ def cmd_measure_cell_nucleus(args: argparse.Namespace) -> None:
     save_table(df, args.output)
 
 
+def cmd_analyze_cluster(args: argparse.Namespace) -> None:
+    """Execute the analyze-cluster sub-command."""
+    from segmentation_measurement.analysis import cluster_measurements
+    df = load_table(args.table)
+    kwargs: dict = {}
+    if args.n_clusters is not None:
+        kwargs["n_clusters"] = args.n_clusters
+    if args.eps is not None:
+        kwargs["eps"] = args.eps
+    if args.min_samples is not None:
+        kwargs["min_samples"] = args.min_samples
+    if args.min_cluster_size is not None:
+        kwargs["min_cluster_size"] = args.min_cluster_size
+    if args.bandwidth is not None and args.bandwidth > 0:
+        kwargs["bandwidth"] = args.bandwidth
+    result = cluster_measurements(df, method=args.method, **kwargs)
+    save_table(result, args.output)
+
+    if args.segmentation and args.output_segmentation:
+        seg = _load_segmentation(args.segmentation)
+        out = np.zeros_like(seg)
+        for label_id, cluster_id in zip(result["label"].values, result["cluster_id"].values):
+            if int(cluster_id) > 0:  # 1-based; skip noise (-1)
+                out[seg == int(label_id)] = int(cluster_id)
+        _save_segmentation(out, args.output_segmentation)
+
+
 def cmd_analyze_threshold(args: argparse.Namespace) -> None:
     """Execute the analyze-threshold sub-command."""
     from segmentation_measurement.analysis import (
@@ -211,6 +238,48 @@ def main() -> None:
     analyze_parser = subparsers.add_parser("analyze", help="Analysis utilities.")
     analyze_subparsers = analyze_parser.add_subparsers(dest="subcommand")
     analyze_subparsers.required = True
+
+    clust = analyze_subparsers.add_parser(
+        "cluster",
+        help="Cluster segments using their measurement features.",
+    )
+    clust.add_argument(
+        "--table", required=True,
+        help="Input measurement table (CSV, TSV, or XLSX).",
+    )
+    clust.add_argument(
+        "--method",
+        default="kmeans",
+        choices=["kmeans", "dbscan", "hdbscan", "mean_shift"],
+        help="Clustering method (default: kmeans).",
+    )
+    clust.add_argument("--n-clusters", type=int, default=None, help="K-Means: number of clusters.")
+    clust.add_argument("--eps", type=float, default=None, help="DBSCAN: neighbourhood radius.")
+    clust.add_argument(
+        "--min-samples", type=int, default=None,
+        help="DBSCAN/HDBSCAN: minimum samples in a neighbourhood.",
+    )
+    clust.add_argument(
+        "--min-cluster-size", type=int, default=None,
+        help="HDBSCAN: minimum cluster size.",
+    )
+    clust.add_argument(
+        "--bandwidth", type=float, default=None,
+        help="Mean Shift: bandwidth (0 or omit for automatic estimation).",
+    )
+    clust.add_argument(
+        "--output", required=True,
+        help="Output table file with cluster_id column (CSV, TSV, or XLSX).",
+    )
+    clust.add_argument(
+        "--segmentation", default=None,
+        help="Segmentation TIFF file (required for --output-segmentation).",
+    )
+    clust.add_argument(
+        "--output-segmentation", default=None,
+        help="Output cluster segmentation TIFF file.",
+    )
+    clust.set_defaults(func=cmd_analyze_cluster)
 
     thresh = analyze_subparsers.add_parser(
         "threshold",

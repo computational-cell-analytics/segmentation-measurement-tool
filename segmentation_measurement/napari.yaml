@@ -17,6 +17,9 @@ contributions:
     - id: segmentation-measurement.cell_nucleus_widget
       python_name: segmentation_measurement._cell_nucleus_widget:CellNucleusWidget
       title: Cell-Nucleus Measurement
+    - id: segmentation-measurement.clustering_widget
+      python_name: segmentation_measurement._clustering_widget:ClusteringWidget
+      title: Clustering Analysis
   widgets:
     - command: segmentation-measurement.postprocessing_widget
       display_name: Postprocessing
@@ -28,3 +31,5 @@ contributions:
       display_name: Threshold Analysis
     - command: segmentation-measurement.cell_nucleus_widget
       display_name: Cell-Nucleus Measurement
+    - command: segmentation-measurement.clustering_widget
+      display_name: Clustering Analysis
