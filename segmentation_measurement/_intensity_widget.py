@@ -17,7 +17,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from segmentation_measurement._utils import populate_table_widget, save_table
+from segmentation_measurement._utils import populate_table_widget, register_table, save_table
 
 
 class IntensityWidget(QWidget):
@@ -103,6 +103,7 @@ class IntensityWidget(QWidget):
         intensity_image = self._viewer.layers[img_name].data
         self._measurements = measure_intensities(segmentation, intensity_image)
         populate_table_widget(self._table, self._measurements)
+        register_table(f"Intensity ({seg_name})", self._measurements)
 
     def _save_table(self) -> None:
         if self._measurements is None:

@@ -45,6 +45,33 @@ def load_table(path: str) -> pd.DataFrame:
         return pd.read_csv(p)
 
 
+_TABLE_REGISTRY: dict[str, pd.DataFrame] = {}
+
+
+def register_table(name: str, df: pd.DataFrame) -> None:
+    """Register a measurement DataFrame in the in-memory table registry.
+
+    Args:
+        name (str): Identifier shown in the threshold widget's table combo.
+        df (pd.DataFrame): Measurement table to register.
+    """
+    _TABLE_REGISTRY[name] = df.copy()
+
+
+def get_registered_tables() -> dict[str, pd.DataFrame]:
+    """Return a snapshot of all currently registered tables.
+
+    Returns:
+        dict[str, pd.DataFrame]: Mapping of name → DataFrame.
+    """
+    return dict(_TABLE_REGISTRY)
+
+
+def clear_table_registry() -> None:
+    """Remove all entries from the table registry (used in tests)."""
+    _TABLE_REGISTRY.clear()
+
+
 def populate_table_widget(table_widget: object, df: pd.DataFrame) -> None:
     """Fill a QTableWidget with DataFrame contents.
 

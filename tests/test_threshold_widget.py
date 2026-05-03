@@ -1,6 +1,5 @@
 """GUI tests for the napari threshold analysis widget."""
 import os
-import tempfile
 
 import numpy as np
 import pandas as pd
@@ -14,10 +13,17 @@ _CI_XFAIL = pytest.mark.xfail(
 )
 
 
-def _write_csv(tmpdir, df, filename="measurements.csv"):
-    path = os.path.join(tmpdir, filename)
-    df.to_csv(path, index=False)
-    return path
+@pytest.fixture(autouse=True)
+def _clear_registry():
+    from segmentation_measurement._utils import clear_table_registry
+    clear_table_registry()
+    yield
+    clear_table_registry()
+
+
+def _register(name, df):
+    from segmentation_measurement._utils import register_table
+    register_table(name, df)
 
 
 def test_widget_instantiation(make_napari_viewer, qtbot):
@@ -38,38 +44,45 @@ def test_seg_combo_populated_on_labels_add(make_napari_viewer, qtbot):
     assert "seg" in items
 
 
-def test_load_table_populates_table_widget(make_napari_viewer, qtbot):
+def test_refresh_populates_table_combo(make_napari_viewer, qtbot):
     from segmentation_measurement._threshold_widget import ThresholdWidget
-    df = pd.DataFrame({
-        "label": [1, 2, 3],
-        "mean_intensity": [10.0, 50.0, 90.0],
-    })
+    df = pd.DataFrame({"label": [1, 2], "mean_intensity": [10.0, 90.0]})
+    _register("Intensity (cells)", df)
     viewer = make_napari_viewer()
     widget = ThresholdWidget(viewer)
     qtbot.addWidget(widget)
-    with tempfile.TemporaryDirectory() as tmpdir:
-        path = _write_csv(tmpdir, df)
-        widget._path_edit.setText(path)
-        widget._load_table()
+    widget._refresh_table_combo()
+    items = [widget._table_combo.itemText(i) for i in range(widget._table_combo.count())]
+    assert "Intensity (cells)" in items
+
+
+def test_select_table_populates_display(make_napari_viewer, qtbot):
+    from segmentation_measurement._threshold_widget import ThresholdWidget
+    df = pd.DataFrame({"label": [1, 2, 3], "mean_intensity": [10.0, 50.0, 90.0]})
+    _register("Intensity (cells)", df)
+    viewer = make_napari_viewer()
+    widget = ThresholdWidget(viewer)
+    qtbot.addWidget(widget)
+    widget._refresh_table_combo()
+    widget._table_combo.setCurrentText("Intensity (cells)")
     assert widget._measurements is not None
     assert len(widget._measurements) == 3
     assert widget._table.rowCount() == 3
 
 
-def test_load_table_populates_col_combo(make_napari_viewer, qtbot):
+def test_select_table_populates_col_combo(make_napari_viewer, qtbot):
     from segmentation_measurement._threshold_widget import ThresholdWidget
     df = pd.DataFrame({
         "label": [1, 2],
         "mean_intensity": [10.0, 90.0],
         "area": [100.0, 200.0],
     })
+    _register("Intensity (cells)", df)
     viewer = make_napari_viewer()
     widget = ThresholdWidget(viewer)
     qtbot.addWidget(widget)
-    with tempfile.TemporaryDirectory() as tmpdir:
-        path = _write_csv(tmpdir, df)
-        widget._path_edit.setText(path)
-        widget._load_table()
+    widget._refresh_table_combo()
+    widget._table_combo.setCurrentText("Intensity (cells)")
     cols = [widget._col_combo.itemText(i) for i in range(widget._col_combo.count())]
     assert "mean_intensity" in cols
     assert "area" in cols
@@ -82,13 +95,12 @@ def test_suggest_thresholds_sets_spinbox_values(make_napari_viewer, qtbot):
         "label": [1, 2, 3, 4],
         "mean_intensity": [10.0, 30.0, 70.0, 90.0],
     })
+    _register("Intensity (cells)", df)
     viewer = make_napari_viewer()
     widget = ThresholdWidget(viewer)
     qtbot.addWidget(widget)
-    with tempfile.TemporaryDirectory() as tmpdir:
-        path = _write_csv(tmpdir, df)
-        widget._path_edit.setText(path)
-        widget._load_table()
+    widget._refresh_table_combo()
+    widget._table_combo.setCurrentText("Intensity (cells)")
     widget._n_spin.setValue(2)
     widget._col_combo.setCurrentText("mean_intensity")
     widget._suggest_thresholds()
@@ -112,18 +124,14 @@ def test_categorize_creates_output_layer(make_napari_viewer, qtbot):
     seg = np.zeros((20, 20), dtype=np.int32)
     seg[2:8, 2:8] = 1
     seg[12:18, 12:18] = 2
-    df = pd.DataFrame({
-        "label": [1, 2],
-        "mean_intensity": [10.0, 90.0],
-    })
+    df = pd.DataFrame({"label": [1, 2], "mean_intensity": [10.0, 90.0]})
+    _register("Intensity (seg)", df)
     viewer = make_napari_viewer()
     viewer.add_labels(seg, name="seg")
     widget = ThresholdWidget(viewer)
     qtbot.addWidget(widget)
-    with tempfile.TemporaryDirectory() as tmpdir:
-        path = _write_csv(tmpdir, df)
-        widget._path_edit.setText(path)
-        widget._load_table()
+    widget._refresh_table_combo()
+    widget._table_combo.setCurrentText("Intensity (seg)")
     widget._seg_combo.setCurrentText("seg")
     widget._n_spin.setValue(2)
     widget._col_combo.setCurrentText("mean_intensity")
@@ -142,18 +150,14 @@ def test_categorize_adds_category_columns_to_table(make_napari_viewer, qtbot):
     from segmentation_measurement._threshold_widget import ThresholdWidget
     seg = np.zeros((20, 20), dtype=np.int32)
     seg[2:8, 2:8] = 1
-    df = pd.DataFrame({
-        "label": [1],
-        "mean_intensity": [10.0],
-    })
+    df = pd.DataFrame({"label": [1], "mean_intensity": [10.0]})
+    _register("Intensity (seg)", df)
     viewer = make_napari_viewer()
     viewer.add_labels(seg, name="seg")
     widget = ThresholdWidget(viewer)
     qtbot.addWidget(widget)
-    with tempfile.TemporaryDirectory() as tmpdir:
-        path = _write_csv(tmpdir, df)
-        widget._path_edit.setText(path)
-        widget._load_table()
+    widget._refresh_table_combo()
+    widget._table_combo.setCurrentText("Intensity (seg)")
     widget._seg_combo.setCurrentText("seg")
     widget._n_spin.setValue(2)
     widget._col_combo.setCurrentText("mean_intensity")
@@ -173,14 +177,13 @@ def test_categorize_updates_existing_layer(make_napari_viewer, qtbot):
     seg = np.zeros((20, 20), dtype=np.int32)
     seg[2:8, 2:8] = 1
     df = pd.DataFrame({"label": [1], "mean_intensity": [10.0]})
+    _register("Intensity (seg)", df)
     viewer = make_napari_viewer()
     viewer.add_labels(seg, name="seg")
     widget = ThresholdWidget(viewer)
     qtbot.addWidget(widget)
-    with tempfile.TemporaryDirectory() as tmpdir:
-        path = _write_csv(tmpdir, df)
-        widget._path_edit.setText(path)
-        widget._load_table()
+    widget._refresh_table_combo()
+    widget._table_combo.setCurrentText("Intensity (seg)")
     widget._seg_combo.setCurrentText("seg")
     widget._n_spin.setValue(2)
     widget._col_combo.setCurrentText("mean_intensity")
@@ -200,13 +203,26 @@ def test_works_with_morphology_table(make_napari_viewer, qtbot):
         "area": [100.0, 200.0, 300.0],
         "sphericity": [0.8, 0.9, 0.95],
     })
+    _register("Morphology (cells)", df)
     viewer = make_napari_viewer()
     widget = ThresholdWidget(viewer)
     qtbot.addWidget(widget)
-    with tempfile.TemporaryDirectory() as tmpdir:
-        path = _write_csv(tmpdir, df)
-        widget._path_edit.setText(path)
-        widget._load_table()
+    widget._refresh_table_combo()
+    widget._table_combo.setCurrentText("Morphology (cells)")
     cols = [widget._col_combo.itemText(i) for i in range(widget._col_combo.count())]
     assert "area" in cols
     assert "sphericity" in cols
+
+
+def test_multiple_tables_in_combo(make_napari_viewer, qtbot):
+    """Both intensity and morphology tables appear in the combo."""
+    from segmentation_measurement._threshold_widget import ThresholdWidget
+    _register("Intensity (cells)", pd.DataFrame({"label": [1], "mean_intensity": [5.0]}))
+    _register("Morphology (cells)", pd.DataFrame({"label": [1], "area": [100.0]}))
+    viewer = make_napari_viewer()
+    widget = ThresholdWidget(viewer)
+    qtbot.addWidget(widget)
+    widget._refresh_table_combo()
+    items = [widget._table_combo.itemText(i) for i in range(widget._table_combo.count())]
+    assert "Intensity (cells)" in items
+    assert "Morphology (cells)" in items

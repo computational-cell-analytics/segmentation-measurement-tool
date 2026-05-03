@@ -28,13 +28,16 @@ def measure_morphology(
     surface area (via marching cubes), sphericity, solidity, major and minor
     axis lengths, and equivalent diameter.
 
+    Physical units are applied via the ``scale`` parameter.  Anisotropic
+    voxel sizes are supported by passing a per-dimension tuple.
+
     Args:
         segmentation (np.ndarray): Integer-valued label array where 0 is
             background.  Must be 2D or 3D.
         scale (float | tuple): Physical size of a pixel/voxel. A single float
-            is interpreted as isotropic spacing. A tuple of length ``ndim``
-            gives per-dimension spacing (e.g. ``(z, y, x)`` for 3D).
-            Defaults to 1.0 (pixel units).
+            is interpreted as isotropic spacing. A tuple must have one value
+            per spatial dimension in ``(Y, X)`` order for 2D or ``(Z, Y, X)``
+            order for 3D. Defaults to 1.0 (pixel/voxel units).
 
     Returns:
         pd.DataFrame: One row per segment.  2D columns: ``label``, ``area``,
@@ -64,33 +67,38 @@ def measure_morphology(
                 f"got {len(scale_tuple)}."
             )
 
-    props = regionprops(segmentation)
+    # Pass spacing so regionprops returns all length/area/volume measurements
+    # in physical units, handling anisotropic voxel sizes exactly.
+    props = regionprops(segmentation, spacing=scale_tuple)
     if not props:
         columns = _COLUMNS_2D if ndim == 2 else _COLUMNS_3D
         return pd.DataFrame(columns=columns)
-
-    pixel_measure = float(np.prod(scale_tuple))
-    mean_scale = float(np.mean(scale_tuple))
 
     rows = []
     for region in props:
         row: dict = {"label": region.label, "solidity": float(region.solidity)}
 
         if ndim == 2:
-            area = region.area * pixel_measure
-            perimeter = region.perimeter * mean_scale
+            area = float(region.area)  # physical area via spacing
+            # region.perimeter raises NotImplementedError for anisotropic spacing.
+            # Compute perimeter in pixel space then scale by the geometric mean of
+            # the spacings.  For isotropic spacing this is exact; for anisotropic
+            # it is the best single-factor approximation of the Crofton formula.
+            from skimage.measure import perimeter_crofton
+            pixel_perimeter = float(perimeter_crofton(region.image))
+            perimeter = pixel_perimeter * float(np.sqrt(np.prod(scale_tuple)))
             sphericity = (
                 4.0 * np.pi * area / (perimeter ** 2) if perimeter > 0 else 0.0
             )
             row["area"] = area
             row["perimeter"] = perimeter
             row["sphericity"] = sphericity
-            row["axis_major_length"] = region.axis_major_length * mean_scale
-            row["axis_minor_length"] = region.axis_minor_length * mean_scale
-            row["equivalent_diameter"] = region.equivalent_diameter_area * mean_scale
+            row["axis_major_length"] = float(region.axis_major_length)
+            row["axis_minor_length"] = float(region.axis_minor_length)
+            row["equivalent_diameter"] = float(region.equivalent_diameter_area)
 
         else:  # 3D
-            volume = region.area * pixel_measure
+            volume = float(region.area)  # physical volume via spacing
 
             binary = segmentation == region.label
             padded = np.pad(binary[region.slice], 1)
@@ -110,9 +118,9 @@ def measure_morphology(
             row["volume"] = volume
             row["surface_area"] = surface_area
             row["sphericity"] = sphericity
-            row["axis_major_length"] = region.axis_major_length * mean_scale
-            row["axis_minor_length"] = region.axis_minor_length * mean_scale
-            row["equivalent_diameter"] = region.equivalent_diameter_area * mean_scale
+            row["axis_major_length"] = float(region.axis_major_length)
+            row["axis_minor_length"] = float(region.axis_minor_length)
+            row["equivalent_diameter"] = float(region.equivalent_diameter_area)
 
         rows.append(row)
 

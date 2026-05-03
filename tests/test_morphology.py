@@ -39,19 +39,33 @@ class TestMeasureMorphology2D(unittest.TestCase):
 
     def test_area_correct_unit_scale(self):
         result = measure_morphology(self._make_square_2d())
-        # 10x10 square = 100 pixels
         self.assertAlmostEqual(result.iloc[0]["area"], 100.0, places=1)
 
-    def test_area_correct_physical_scale(self):
+    def test_area_correct_isotropic_scale(self):
         result = measure_morphology(self._make_square_2d(), scale=0.5)
-        # 100 pixels * 0.25 = 25
+        # 100 pixels * (0.5 * 0.5) = 25
         self.assertAlmostEqual(result.iloc[0]["area"], 25.0, places=1)
+
+    def test_area_anisotropic_scale_2d(self):
+        result = measure_morphology(self._make_square_2d(), scale=(0.5, 1.0))
+        # 100 pixels * (0.5 * 1.0) = 50
+        self.assertAlmostEqual(result.iloc[0]["area"], 50.0, places=1)
+
+    def test_anisotropic_scale_affects_axis_lengths(self):
+        # A square region: with isotropic scale both axes equal;
+        # with (2.0, 1.0) the major axis should be larger than with (1.0, 1.0).
+        result_iso = measure_morphology(self._make_square_2d(), scale=1.0)
+        result_aniso = measure_morphology(self._make_square_2d(), scale=(2.0, 1.0))
+        self.assertGreater(
+            result_aniso.iloc[0]["axis_major_length"],
+            result_iso.iloc[0]["axis_major_length"],
+        )
 
     def test_sphericity_bounded(self):
         result = measure_morphology(self._make_square_2d())
         s = result.iloc[0]["sphericity"]
         self.assertGreater(s, 0.0)
-        self.assertLessEqual(s, 1.0 + 1e-6)  # circle has sphericity=1
+        self.assertLessEqual(s, 1.0 + 1e-6)
 
     def test_solidity_bounded(self):
         result = measure_morphology(self._make_square_2d())
@@ -68,6 +82,10 @@ class TestMeasureMorphology2D(unittest.TestCase):
     def test_raises_on_unsupported_ndim(self):
         with self.assertRaises(ValueError):
             measure_morphology(np.zeros((5, 5, 5, 5), dtype=np.int32))
+
+    def test_raises_on_wrong_scale_length(self):
+        with self.assertRaises(ValueError):
+            measure_morphology(self._make_square_2d(), scale=(1.0, 1.0, 1.0))
 
 
 class TestMeasureMorphology3D(unittest.TestCase):
@@ -89,23 +107,40 @@ class TestMeasureMorphology3D(unittest.TestCase):
 
     def test_volume_correct_unit_scale(self):
         result = measure_morphology(self._make_cube_3d())
-        # 10x10x10 = 1000 voxels
         self.assertAlmostEqual(result.iloc[0]["volume"], 1000.0, places=1)
 
-    def test_volume_correct_physical_scale(self):
+    def test_volume_correct_isotropic_scale(self):
         result = measure_morphology(self._make_cube_3d(), scale=0.5)
-        # 1000 voxels * 0.125 = 125
+        # 1000 * (0.5^3) = 125
         self.assertAlmostEqual(result.iloc[0]["volume"], 125.0, places=1)
+
+    def test_volume_anisotropic_scale_3d(self):
+        result = measure_morphology(self._make_cube_3d(), scale=(2.0, 1.0, 1.0))
+        # 1000 * (2.0 * 1.0 * 1.0) = 2000
+        self.assertAlmostEqual(result.iloc[0]["volume"], 2000.0, places=1)
 
     def test_surface_area_positive(self):
         result = measure_morphology(self._make_cube_3d())
         self.assertGreater(result.iloc[0]["surface_area"], 0.0)
+
+    def test_surface_area_anisotropic_scale(self):
+        result_iso = measure_morphology(self._make_cube_3d(), scale=1.0)
+        result_aniso = measure_morphology(self._make_cube_3d(), scale=(2.0, 1.0, 1.0))
+        # Stretching in Z doubles two faces, so surface area increases.
+        self.assertGreater(
+            result_aniso.iloc[0]["surface_area"],
+            result_iso.iloc[0]["surface_area"],
+        )
 
     def test_sphericity_bounded_3d(self):
         result = measure_morphology(self._make_cube_3d())
         s = result.iloc[0]["sphericity"]
         self.assertGreater(s, 0.0)
         self.assertLessEqual(s, 1.0 + 1e-6)
+
+    def test_raises_on_wrong_scale_length_3d(self):
+        with self.assertRaises(ValueError):
+            measure_morphology(self._make_cube_3d(), scale=(1.0, 1.0))
 
 
 class TestMorphologyCLI(unittest.TestCase):
@@ -132,7 +167,7 @@ class TestMorphologyCLI(unittest.TestCase):
             self.assertEqual(len(df), 2)
             self.assertIn("area", df.columns)
 
-    def test_measure_morphology_cli_with_scale(self):
+    def test_measure_morphology_cli_isotropic_scale(self):
         seg = np.zeros((10, 10), dtype=np.int32)
         seg[2:8, 2:8] = 1
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -146,8 +181,25 @@ class TestMorphologyCLI(unittest.TestCase):
                 "--scale", "0.5",
             ])
             df = pd.read_csv(out_path)
-            # 6x6 = 36 pixels * 0.25 = 9.0
+            # 6x6 = 36 pixels * (0.5 * 0.5) = 9.0
             self.assertAlmostEqual(df.iloc[0]["area"], 9.0, places=1)
+
+    def test_measure_morphology_cli_anisotropic_scale(self):
+        seg = np.zeros((10, 10), dtype=np.int32)
+        seg[2:8, 2:8] = 1
+        with tempfile.TemporaryDirectory() as tmpdir:
+            seg_path = os.path.join(tmpdir, "seg.tif")
+            out_path = os.path.join(tmpdir, "morphology.csv")
+            tifffile.imwrite(seg_path, seg)
+            self._call_main([
+                "measure", "morphology",
+                "--segmentation", seg_path,
+                "--output", out_path,
+                "--scale", "0.5", "1.0",
+            ])
+            df = pd.read_csv(out_path)
+            # 36 pixels * (0.5 * 1.0) = 18.0
+            self.assertAlmostEqual(df.iloc[0]["area"], 18.0, places=1)
 
 
 if __name__ == "__main__":
