@@ -19,9 +19,9 @@ from qtpy.QtWidgets import (
 class PostprocessingWidget(QWidget):
     """Widget for applying post-processing operations to segmentation layers."""
 
-    def __init__(self, viewer: napari.Viewer) -> None:
+    def __init__(self, napari_viewer: napari.Viewer) -> None:
         super().__init__()
-        self._viewer = viewer
+        self._viewer = napari_viewer
         self._setup_ui()
         self._viewer.layers.events.inserted.connect(self._update_layer_combos)
         self._viewer.layers.events.removed.connect(self._update_layer_combos)

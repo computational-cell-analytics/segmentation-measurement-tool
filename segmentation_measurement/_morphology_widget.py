@@ -1,4 +1,4 @@
-"""Napari widget for intensity measurements."""
+"""Napari widget for morphology measurements."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import pandas as pd
 import napari
 from qtpy.QtWidgets import (
     QComboBox,
+    QDoubleSpinBox,
     QFileDialog,
     QGroupBox,
     QHBoxLayout,
@@ -20,8 +21,8 @@ from qtpy.QtWidgets import (
 from segmentation_measurement._utils import populate_table_widget, save_table
 
 
-class IntensityWidget(QWidget):
-    """Widget for measuring per-segment intensities."""
+class MorphologyWidget(QWidget):
+    """Widget for measuring per-segment morphological properties."""
 
     def __init__(self, napari_viewer: napari.Viewer) -> None:
         super().__init__()
@@ -48,16 +49,20 @@ class IntensityWidget(QWidget):
         seg_layout = QHBoxLayout()
         seg_layout.addWidget(QLabel("Segmentation:"))
         self._seg_combo = QComboBox()
+        self._seg_combo.currentTextChanged.connect(self._on_seg_changed)
         seg_layout.addWidget(self._seg_combo)
         layout.addLayout(seg_layout)
 
-        img_layout = QHBoxLayout()
-        img_layout.addWidget(QLabel("Intensity image:"))
-        self._img_combo = QComboBox()
-        img_layout.addWidget(self._img_combo)
-        layout.addLayout(img_layout)
+        scale_layout = QHBoxLayout()
+        scale_layout.addWidget(QLabel("Pixel/voxel size:"))
+        self._scale_spin = QDoubleSpinBox()
+        self._scale_spin.setRange(1e-9, 1e9)
+        self._scale_spin.setDecimals(6)
+        self._scale_spin.setValue(1.0)
+        scale_layout.addWidget(self._scale_spin)
+        layout.addLayout(scale_layout)
 
-        self._measure_btn = QPushButton("Measure intensities")
+        self._measure_btn = QPushButton("Measure morphology")
         self._measure_btn.clicked.connect(self._run_measurement)
         layout.addWidget(self._measure_btn)
 
@@ -73,35 +78,35 @@ class IntensityWidget(QWidget):
         layout.addWidget(table_group)
 
     def _update_layer_combos(self, event: object = None) -> None:
-        from napari.layers import Image, Labels
+        from napari.layers import Labels
         label_layers = [
             layer.name for layer in self._viewer.layers if isinstance(layer, Labels)
         ]
-        image_layers = [
-            layer.name for layer in self._viewer.layers if isinstance(layer, Image)
-        ]
-        current_seg = self._seg_combo.currentText()
-        current_img = self._img_combo.currentText()
-
+        current = self._seg_combo.currentText()
         self._seg_combo.clear()
         self._seg_combo.addItems(label_layers)
-        if current_seg in label_layers:
-            self._seg_combo.setCurrentText(current_seg)
+        if current in label_layers:
+            self._seg_combo.setCurrentText(current)
 
-        self._img_combo.clear()
-        self._img_combo.addItems(image_layers)
-        if current_img in image_layers:
-            self._img_combo.setCurrentText(current_img)
+    def _on_seg_changed(self, name: str) -> None:
+        """Update scale spinbox from the selected label layer's scale."""
+        if not name or name not in [l.name for l in self._viewer.layers]:
+            return
+        layer = self._viewer.layers[name]
+        scale_values = [s for s in layer.scale if s != 0]
+        if scale_values:
+            # Use the mean of non-trivial (non-1) scale values if available
+            import numpy as np
+            self._scale_spin.setValue(float(np.mean(scale_values)))
 
     def _run_measurement(self) -> None:
-        from segmentation_measurement.intensity import measure_intensities
+        from segmentation_measurement.morphology import measure_morphology
         seg_name = self._seg_combo.currentText()
-        img_name = self._img_combo.currentText()
-        if not seg_name or not img_name:
+        if not seg_name:
             return
         segmentation = self._viewer.layers[seg_name].data
-        intensity_image = self._viewer.layers[img_name].data
-        self._measurements = measure_intensities(segmentation, intensity_image)
+        scale = self._scale_spin.value()
+        self._measurements = measure_morphology(segmentation, scale=scale)
         populate_table_widget(self._table, self._measurements)
 
     def _save_table(self) -> None:

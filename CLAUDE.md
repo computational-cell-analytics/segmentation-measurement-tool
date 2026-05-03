@@ -1,12 +1,12 @@
 # General Design
 
-This repository provides common functionality for post-processing,  measurements, and analysis of instance segmentations for microscopy image analysis. The functionality is currently being implemented.
+This repository provides common functionality for post-processing, measurements, and analysis of instance segmentations for microscopy image analysis. The functionality is currently being implemented.
 
 Specifically, it provides / will provide the following functionality:
-- A utility for post-processing segmentations, such as size filtering, filling small holes, and computing a ring-mask across segments.
-- A utility for measuring intensities.
-- A utility for measuring cell to nucleus intensity ratios and related measures.
-- A utility for measuring morphology, such as area / volume, surface, sphericity, etc.
+- Post-processing segmentations, such as size filtering, filling small holes, and computing a ring-mask across segments.
+- Common post-processing operations such as size filtering and hole-closing.
+- Common measurements, such as morphology, intensity, and combined cytosol and nucleus features.
+- Analysis functionality such as thresholding, clustering, and classification, based on the measureents.
 
 For each utility the following entrypoints are provided:
 - A python function in the `segmentation_measurement` python library.
@@ -23,11 +23,16 @@ The napari plugin should support visualizing the measurements as tables and supp
 
 The documentation is built with pdoc. Extra documentation is written in the folder `doc/`, with `doc/start.md` containing a short description of the tool and the installation instructions, `doc/napari.md` a detailed documentation of the napari plugin, and `doc/cli.md` a detailed documentation of the CLI.
 
-Below are details on the functionality.
+The functionality is divided into three categories:
+- Segmentation post-processing
+- Segmentation-derived measurements
+- Analysis of measurements
 
-## Post-processing utility
+Below is a description of the respective functionality. Some of it is not yet implemented.
 
-Should implement the following post-processing functionality:
+# Post-processing
+
+Implements the following post-processing functionality:
 - Filter out small segments below a certain size threshold and set these to zero (background label).
 - Remove small holes from segments, below a given size threshold.
 - Compute the "ring-mask" of all segments. I.e. the ring / hull around each segment of a specified pixel / voxel size that gets assigned the same ID as its respective segment.
@@ -37,18 +42,59 @@ Implementation guide:
 - In the CLI it should be a single top-level command that has individual sub-commands per functionality.
 - In napari it should be a single widget that enables running the different post-processing methods with a specified input segmentation and (new) output segmentation. If input and output segmentation are the same the input segmentation should be post-processed in place.
 
-## Intensity measurement widget
+# Measurements
+
+Measurements are implemented via `skimage.measure.regionprops`. 
+The measurement python functions return a pandas dataframe with the measurement result. 
+The CLI saves the results to an excel, csv, or tsv table, derived from the output filename, with csv as default if no extension is given.
+
+The napari plugin widgets add the respective widget to the left interface. With a button for saving the result to a csv, tsv, or excel file.
+
+Common functionality, such as table saving and table representation in napari, should be re-used between functions and plugin widgets.
+
+## Intensity measurement
 
 Takes as input a segmentation and an intensity image.
 
-Should implement the following functionality:
-- Computing intensity measurements: the mean, median, max, standard deviation and reasonable percentiles. Use skimage regionprops and represent the results as a pandas dataframe.
-- Separating the cells into N different categories based on N-1 thresholds with respect to one of the measurements, e.g. 3 categories based on the mean intensity. The function should take the dataframe from the previous function as input.
-- A function to suggest the thresholds for the N categories and a given column based on a suitable heuristics.
+Implements the following functionality: compute intensity measurements: the mean, median, max, standard deviation and reasonable percentiles.
 
-The napari plugin should provide these three features so that:
-- Users can first select image and segmentation to measure the per object intensity table.
-- The table and a histogram of a selected column are displayed in the widget. 
+The napari plugin provides these feature:
+- Users can select image and segmentation to measure the per object intensity table.
+- The table is then displayed in the widget.
+
+## Morphology measurement
+
+Takes as input a segmentation. Also the physical scale / pixel size of the segmentation. The default for the scale is 1 (isotropic).
+
+Computes the following morphological features for 2d / 3d:
+volume / area, surface area / circumference, sphericity, solidity, extent of the major axes (ellipsoidal fit), radius of a fit sphere
+
+The napari plugin widget derives the default values for physical scale from the scale of the label layer (if available, otherwise defaults to 1).
+
+## Cell-nucleus measurement
+
+Not yet implemented
+
+# Analysis
+
+The python functions take a pandas dataframe as input, the CLI the path to a saved table. The napari plugin widgets operate on a table that was produced by one of the measurement widgets.
+
+## Threshold-based analysis
+
+This functionality operates on one of the measurement results (from above) and enables the following:
+- Separating the objects into N different categories based on N-1 thresholds with respect to one of the measurements, e.g. 3 categories based on the mean intensity.
+- A function to suggest the thresholds for the N categories and a given column based on a suitable heuristics.
+- If thresholds are not provided for the main function, the heuristics are used.
+
+The napari plugin works as follows:
+- The table (output from a measurement tool) can be selected.
+- A histogram of a selected column is displayed in the widget. 
 - The user can then either enter the number of categories and corresponding thresholds or just the number of categories and derive the thresholds via the heuristics. Categories can be named. It should be possible to modify the suggested thresholds; they should be shown in the histogram. The output should be a new segmentation layer that gives objects the category id and a new column in the intensity table with the category ID and name.
 
-Implementation details on other functionality will follow.
+## Clustering analysis
+
+Not yet implemented
+
+## Classification analysis
+
+Not yet implemented

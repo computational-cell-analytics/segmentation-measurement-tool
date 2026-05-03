@@ -8,8 +8,18 @@ contributions:
     - id: segmentation-measurement.intensity_widget
       python_name: segmentation_measurement._intensity_widget:IntensityWidget
       title: Intensity Measurement
+    - id: segmentation-measurement.morphology_widget
+      python_name: segmentation_measurement._morphology_widget:MorphologyWidget
+      title: Morphology Measurement
+    - id: segmentation-measurement.threshold_widget
+      python_name: segmentation_measurement._threshold_widget:ThresholdWidget
+      title: Threshold Analysis
   widgets:
     - command: segmentation-measurement.postprocessing_widget
       display_name: Postprocessing
     - command: segmentation-measurement.intensity_widget
       display_name: Intensity Measurement
+    - command: segmentation-measurement.morphology_widget
+      display_name: Morphology Measurement
+    - command: segmentation-measurement.threshold_widget
+      display_name: Threshold Analysis
