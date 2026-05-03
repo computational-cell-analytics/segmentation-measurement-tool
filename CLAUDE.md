@@ -1,29 +1,29 @@
 # General Design
 
-The goal of this repository is to provide common functionality for post-processing and measurements of instance segmentations for microscopy image analysis.
+This repository provides common functionality for post-processing,  measurements, and analysis of instance segmentations for microscopy image analysis. The functionality is currently being implemented.
 
-Specifically, the goal is to provide the following functionality:
+Specifically, it provides / will provide the following functionality:
 - A utility for post-processing segmentations, such as size filtering, filling small holes, and computing a ring-mask across segments.
 - A utility for measuring intensities.
 - A utility for measuring cell to nucleus intensity ratios and related measures.
 - A utility for measuring morphology, such as area / volume, surface, sphericity, etc.
 
-For each utility the following entrypoints should be provided:
+For each utility the following entrypoints are provided:
 - A python function in the `segmentation_measurement` python library.
 - A napari plugin widget with in the `segmentation_measurement` napari plugin.
 - A command line utility function.
 
-Tests for the python fucntion and CLI should be written with `unittest`.
+Tests for the python function and CLI are written with `unittest` and `pytest`.
 
 The library should be pip-installable, the functionality should be implemented with skimage, scipy, pandas and other standard scientific python libraries. All functions should support 2D and 3D inputs (or arbitrary dimensionality if possible).
 
-All python functions should be documented with doc strings according to google convention, and the code should be PEP8 compliant. All functions that have a doc-string should use type annotations.
+All python functions are documented with doc strings according to google convention and use type annotations. The code should be PEP8 compliant.
 
-The napari plugin should support visualizing the measurements as tables and support saving these to excel, csv, tsv, and other relevant formats.
+The napari plugin should support visualizing the measurements as tables and support saving these to excel, csv, and tsv.
 
-The documentation should be build with pdoc. It should contain separate and detailed sections that document how the command line utility and the napari plugin are used.
+The documentation is built with pdoc. Extra documentation is written in the folder `doc/`, with `doc/start.md` containing a short description of the tool and the installation instructions, `doc/napari.md` a detailed documentation of the napari plugin, and `doc/cli.md` a detailed documentation of the CLI.
 
-Below are details on the plugins to implement.
+Below are details on the functionality.
 
 ## Post-processing utility
 
