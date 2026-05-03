@@ -125,4 +125,20 @@ Not yet implemented
 
 ## Classification analysis
 
-Not yet implemented
+This functionality operates on one of the measurements (from above) and enables:
+- Interactive annotation in the napari plugin and training of a classifier (logistic regression or random forest from sklearn) based on the features and labels. In the napari plugin.
+- Application of a trained classifier from the plugin to exported tables. In the CLI / python library.
+- Training and saving of a classifier based on one or multiple exported tables with annotations. In the CLI / python library.
+
+Unlike for other features, the CLI / python library does not support the same functionality as the plugin due to the need for labels.
+
+The napari plugin operates as follows:
+- The table (output from a measurement tool) can be selected, as for other analysis plugins.
+- It creates a annotation layer (label layer), where users can put brushstroke annotations, which are projected to the segmentation and used to train the classifier. The annotations are also saved to the table. The classifier uses the features from the table, excluding the 'label' column, the annotation column, and the classification results (ID and name) if already written to the table.
+- The classifier is then applied to the full table, the result is written to a new label layer and a new column in the table.
+- An element in the plugin keeps track of how which labels are present in the annotations and enables users to give these names (to keep track of which class label corresponds to which category), the name is also written to the table.
+- In addition, the trained classifier can be exported.
+
+Make sure to offset the classification IDs with a 1 so that they are 1-based, not 0-based, when saving the classification result to th label layer and table. The classification ID must match the respective annotation from the annotation layer.
+
+The CLI / python library supports applying a trained classifier or training one based on exported tables with annotations, see above.

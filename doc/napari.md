@@ -28,6 +28,8 @@ Open any widget from the napari menu:
 
 **Plugins → Segmentation Measurement → Clustering Analysis → Clustering Analysis**
 
+**Plugins → Segmentation Measurement → Classification Analysis → Classification Analysis**
+
 All widgets appear as dockable panels that can be placed anywhere in the napari window.
 
 ---
@@ -137,8 +139,9 @@ The **Measurements** table is filled with one row per segment.  The columns are:
 | `percentile_75` | 75th percentile (Q3) |
 | `percentile_90` | 90th percentile |
 
-The table is also registered internally so that the **Threshold Analysis** and
-**Clustering Analysis** widgets can access it directly (see below).
+The table is also registered internally so that the **Threshold Analysis**,
+**Clustering Analysis**, and **Classification Analysis** widgets can access it directly
+(see below).
 
 ### Saving the table
 
@@ -212,8 +215,8 @@ The **Measurements** table is filled with one row per segment.
 | `axis_minor_length` | Length of the minor axis of the fitted ellipsoid |
 | `equivalent_diameter` | Diameter of a sphere with the same volume |
 
-The table is also registered internally so that the **Threshold Analysis** and
-**Clustering Analysis** widgets can access it directly.
+The table is also registered internally so that the **Threshold Analysis**,
+**Clustering Analysis**, and **Classification Analysis** widgets can access it directly.
 
 ### Saving the table
 
@@ -366,8 +369,8 @@ When an intensity image is selected, columns are added for each statistic `{stat
 | `nucleus_{stat}_intensity` | Statistic over all nuclear pixels within this cell |
 | `{stat}_intensity_ratio` | `cell_{stat}_intensity / nucleus_{stat}_intensity`; `NaN` when either region is empty or the nucleus value is zero |
 
-The table is also registered internally so that the **Threshold Analysis** and
-**Clustering Analysis** widgets can access it directly.
+The table is also registered internally so that the **Threshold Analysis**,
+**Clustering Analysis**, and **Classification Analysis** widgets can access it directly.
 
 ### Saving the table
 
@@ -473,3 +476,146 @@ overlay always show identical colours.
 
 Click **Save table** to export the measurements with the cluster column (CSV, TSV, or
 Excel).
+
+---
+
+## Classification Analysis Widget
+
+The Classification Analysis widget lets you interactively annotate a small number of
+segments with class labels using napari's paint tools, train a random forest or logistic
+regression classifier on those annotations, and then apply it to every segment in the
+table.  The result is written to a new label layer and two new columns in the measurement
+table.  Trained classifiers can be exported to disk and reloaded later.
+
+### Layout (scrollable)
+
+```
+┌──────────────────────────────────────┐
+│ ┌ Measurement table ───────────────┐ │
+│ │ Table: [combo]  [Refresh]        │ │
+│ │  <table>  [Save table]           │ │
+│ └──────────────────────────────────┘ │
+│ ┌ Layers ──────────────────────────┐ │
+│ │ Segmentation: [combo]            │ │
+│ │ Annotation layer: [combo] [Create new] │
+│ │ [Project annotations to table]   │ │
+│ └──────────────────────────────────┘ │
+│ ┌ Class names ─────────────────────┐ │
+│ │  Label ID │ Class Name           │ │
+│ │  <editable rows>                 │ │
+│ └──────────────────────────────────┘ │
+│ ┌ Classifier ──────────────────────┐ │
+│ │ Method: [Random Forest▾]         │ │
+│ │  <method-specific parameters>    │ │
+│ │ Output layer: [edit]             │ │
+│ │ [Train & Apply]                  │ │
+│ │ [Load classifier] [Apply] [Export classifier] │
+│ └──────────────────────────────────┘ │
+└──────────────────────────────────────┘
+```
+
+### Workflow
+
+#### Step 1 – Select a measurement table
+
+The widget operates on tables produced by the **Intensity Measurement**,
+**Morphology Measurement**, or **Cell-Nucleus Measurement** widgets in the same napari
+session.
+
+1. Run one of the measurement widgets first.
+2. Click **Refresh** to populate the **Table** dropdown with all available tables.
+3. Select the desired table.  The table is displayed in the widget.
+
+#### Step 2 – Create an annotation layer
+
+1. Select the **Segmentation** layer that the table was derived from.
+2. Click **Create new** next to the **Annotation layer** dropdown.  A new, empty Labels
+   layer called `annotations` is added to napari and automatically selected.
+3. Alternatively, select an existing Labels layer from the **Annotation layer** dropdown
+   if you already have annotations you want to use.
+
+#### Step 3 – Paint annotations
+
+Use napari's built-in label painting tools to draw brushstrokes on the annotation layer.
+
+* Each label value you paint (1, 2, 3, …) represents a different class.
+* You can use napari's color picker and label selector to switch between classes.
+* Paint at least a few representative segments from each class.  You do not need to
+  annotate every segment — the classifier will be applied to the rest automatically.
+
+#### Step 4 – Project annotations to the table
+
+Click **Project annotations to table**.  The widget:
+
+1. Reads the pixel-level brushstrokes from the annotation layer.
+2. For each segment in the segmentation, takes the **majority-vote** annotation label
+   across all annotated pixels that overlap that segment.  Segments with no annotation
+   overlap receive annotation `0` (unannotated).
+3. Writes an `annotation` column to the measurement table (displayed in the widget).
+4. Populates the **Class names** table with all annotation label IDs detected.
+
+> **Tip:** Repeat steps 3 and 4 as many times as needed.  Each click of **Project
+> annotations to table** re-reads the current state of the annotation layer.
+
+#### Step 5 – Name the classes (optional)
+
+The **Class names** table lists each detected annotation label ID with an editable name
+field.  Click a name cell and type to rename a class (e.g. change `class_1` to
+`mitotic`, `class_2` to `interphase`).  These names are written to the
+`classification_name` output column.
+
+#### Step 6 – Train and apply the classifier
+
+1. Choose a **Method** (default: **Random Forest**) and adjust the parameters if needed
+   (see table below).
+2. Enter an **Output layer** name (default: `classification`).
+3. Click **Train & Apply**.
+
+Three things happen:
+
+* A scikit-learn classifier is trained on all rows where `annotation > 0`, using all
+  numeric measurement columns as features (excluding `label`, `annotation`,
+  `classification_id`, `classification_name`, `cluster_id`, `category_id`, and
+  `category_name`).  Features are z-score standardised internally.
+* The classifier is applied to **every** row in the table (including unannotated ones).
+  Results are written to two new columns: `classification_id` (1-based integer) and
+  `classification_name` (string).
+* A new Labels layer is created (or updated) in napari where each segment is painted with
+  its `classification_id`.  Distinct colours are assigned per class using the `tab10`
+  colormap.
+
+If you re-run **Train & Apply**, existing `classification_id` and `classification_name`
+columns are excluded from the feature set so they do not affect the new result.
+
+#### Classification methods and parameters
+
+| Method | Widget label | Key parameters (defaults) |
+|--------|-------------|--------------------------|
+| scikit-learn RandomForestClassifier | **Random Forest** | **N estimators** (100), **Max depth** (0 = unlimited) |
+| scikit-learn LogisticRegression | **Logistic Regression** | **C** (1.0), **Max iterations** (1000) |
+
+#### Class IDs
+
+Classification IDs are **1-based** and match the annotation label values painted in the
+annotation layer.  A segment that could not be classified (e.g. because all its feature
+values were NaN) receives `classification_id = 0` and an empty `classification_name`.
+
+#### Applying a pre-trained classifier
+
+To apply a classifier that was saved in a previous session:
+
+1. Click **Load classifier** and select a `.joblib` file.
+2. Click **Apply** (without retraining).
+
+The loaded classifier is applied to the current table immediately.
+
+### Exporting the classifier
+
+Click **Export classifier** to save the trained pipeline (StandardScaler +
+classifier) to a `.joblib` file.  The exported file can be reloaded in the widget (see
+above) or used with the `analyze classify` CLI command to apply it to new tables in batch.
+
+### Saving the table
+
+Click **Save table** to export the measurement table with the `classification_id` and
+`classification_name` columns (CSV, TSV, or Excel).

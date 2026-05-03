@@ -13,9 +13,11 @@ from segmentation_measurement.intensity import measure_intensities
 from segmentation_measurement.morphology import measure_morphology
 from segmentation_measurement.cell_nucleus import measure_cell_nucleus
 from segmentation_measurement.analysis import (
+    apply_classifier,
     categorize_by_threshold,
     cluster_measurements,
     suggest_thresholds,
+    train_classifier,
 )
 
 __all__ = [
@@ -28,6 +30,8 @@ __all__ = [
     "suggest_thresholds",
     "categorize_by_threshold",
     "cluster_measurements",
+    "train_classifier",
+    "apply_classifier",
 ]
 
 __version__ = "0.1.0"

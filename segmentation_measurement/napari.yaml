@@ -20,6 +20,9 @@ contributions:
     - id: segmentation-measurement.clustering_widget
       python_name: segmentation_measurement._clustering_widget:ClusteringWidget
       title: Clustering Analysis
+    - id: segmentation-measurement.classification_widget
+      python_name: segmentation_measurement._classification_widget:ClassificationWidget
+      title: Classification Analysis
   widgets:
     - command: segmentation-measurement.postprocessing_widget
       display_name: Postprocessing
@@ -33,3 +36,5 @@ contributions:
       display_name: Cell-Nucleus Measurement
     - command: segmentation-measurement.clustering_widget
       display_name: Clustering Analysis
+    - command: segmentation-measurement.classification_widget
+      display_name: Classification Analysis
