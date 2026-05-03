@@ -1,5 +1,7 @@
 """Intensity measurement utilities for instance segmentations."""
 
+from __future__ import annotations
+
 import numpy as np
 import pandas as pd
 from skimage.measure import regionprops
@@ -11,7 +13,7 @@ _COLUMNS = [
 ]
 
 
-def measure_intensities(segmentation, intensity_image):
+def measure_intensities(segmentation: np.ndarray, intensity_image: np.ndarray) -> pd.DataFrame:
     """Compute per-segment intensity statistics.
 
     For each labeled segment, computes mean, median, maximum, minimum,
@@ -51,7 +53,7 @@ def measure_intensities(segmentation, intensity_image):
     return pd.DataFrame(rows)
 
 
-def suggest_thresholds(measurements, column, n_categories):
+def suggest_thresholds(measurements: pd.DataFrame, column: str, n_categories: int) -> list[float]:
     """Suggest intensity thresholds for categorizing segments.
 
     Computes ``n_categories - 1`` threshold values at equally-spaced quantiles
@@ -79,7 +81,12 @@ def suggest_thresholds(measurements, column, n_categories):
     return [float(np.percentile(values, q)) for q in quantile_positions]
 
 
-def categorize_by_intensity(measurements, column, thresholds, category_names=None):
+def categorize_by_intensity(
+    measurements: pd.DataFrame,
+    column: str,
+    thresholds: list[float],
+    category_names: list[str] | None = None,
+) -> pd.DataFrame:
     """Assign categories to segments based on intensity thresholds.
 
     Segments with values below the first threshold are assigned category 1,

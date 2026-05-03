@@ -24,12 +24,24 @@ napari = [
     "qtpy",
     "matplotlib",
 ]
+test = [
+    "pytest",
+    "pytest-qt",
+]
+docs = [
+    "pdoc",
+    "markdown",
+]
 
 [project.entry-points."console_scripts"]
 segmentation-measurement = "segmentation_measurement._cli:main"
 
 [project.entry-points."napari.manifest"]
 "segmentation-measurement" = "segmentation_measurement:napari.yaml"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v"
 
 [tool.setuptools.packages.find]
 where = ["."]

@@ -68,12 +68,21 @@ jobs:
             libgl1 \
             libglib2.0-0 \
             libegl1 \
-            libdbus-1-3
+            libdbus-1-3 \
+            libxkbcommon-x11-0 \
+            libxcb-icccm4 \
+            libxcb-image0 \
+            libxcb-keysyms1 \
+            libxcb-randr0 \
+            libxcb-render-util0 \
+            libxcb-xinerama0 \
+            libxcb-xfixes0
 
-      - name: Install package (with napari)
-        run: pip install -e ".[napari]"
+      - name: Install package (with napari and test dependencies)
+        run: pip install -e ".[napari,test]" PyQt5
 
-      - name: Run all tests
+      - name: Run GUI tests
         env:
           QT_QPA_PLATFORM: offscreen
-        run: python -m unittest discover -v tests/
+          PYTHONFAULTHANDLER: "1"
+        run: pytest tests/test_widget.py tests/test_intensity_widget.py

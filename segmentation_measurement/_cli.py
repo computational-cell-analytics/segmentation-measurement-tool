@@ -1,42 +1,47 @@
 """Command line interface for segmentation-measurement."""
 
+from __future__ import annotations
+
 import argparse
 
 import numpy as np
 import tifffile
 
 
-def _load_segmentation(path):
+def _load_segmentation(path: str) -> np.ndarray:
     return tifffile.imread(path)
 
 
-def _save_segmentation(segmentation, path):
+def _save_segmentation(segmentation: np.ndarray, path: str) -> None:
     tifffile.imwrite(path, segmentation)
 
 
-def cmd_filter_small_segments(args):
+def cmd_filter_small_segments(args: argparse.Namespace) -> None:
+    """Execute the filter-small-segments sub-command."""
     from segmentation_measurement.postprocessing import filter_small_segments
     seg = _load_segmentation(args.input)
     result = filter_small_segments(seg, args.min_size)
     _save_segmentation(result, args.output)
 
 
-def cmd_remove_small_holes(args):
+def cmd_remove_small_holes(args: argparse.Namespace) -> None:
+    """Execute the remove-small-holes sub-command."""
     from segmentation_measurement.postprocessing import remove_small_holes
     seg = _load_segmentation(args.input)
     result = remove_small_holes(seg, args.max_hole_size)
     _save_segmentation(result, args.output)
 
 
-def cmd_ring_mask(args):
+def cmd_ring_mask(args: argparse.Namespace) -> None:
+    """Execute the ring-mask sub-command."""
     from segmentation_measurement.postprocessing import compute_ring_mask
     seg = _load_segmentation(args.input)
     result = compute_ring_mask(seg, args.ring_width)
     _save_segmentation(result, args.output)
 
 
-def cmd_measure_intensities(args):
-    import pandas as pd
+def cmd_measure_intensities(args: argparse.Namespace) -> None:
+    """Execute the measure-intensities sub-command."""
     from segmentation_measurement.intensity import measure_intensities
     seg = _load_segmentation(args.segmentation)
     intensity = tifffile.imread(args.intensity)
@@ -49,7 +54,8 @@ def cmd_measure_intensities(args):
         df.to_csv(args.output, index=False)
 
 
-def main():
+def main() -> None:
+    """Entry point for the segmentation-measurement CLI."""
     parser = argparse.ArgumentParser(
         prog="segmentation-measurement",
         description="Post-processing and measurement utilities for instance segmentations.",
