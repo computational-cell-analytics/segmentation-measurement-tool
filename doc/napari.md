@@ -24,6 +24,8 @@ Open any widget from the napari menu:
 
 **Plugins → Segmentation Measurement → Threshold Analysis → Threshold Analysis**
 
+**Plugins → Segmentation Measurement → Cell-Nucleus Measurement → Cell-Nucleus Measurement**
+
 All widgets appear as dockable panels that can be placed anywhere in the napari window.
 
 ---
@@ -293,3 +295,79 @@ Two things happen:
 Segments with a value **below** the first threshold are assigned category 1, segments
 between the first and second threshold are assigned category 2, and so on.  Thresholds
 need not be sorted; the widget sorts them internally.
+
+---
+
+## Cell-Nucleus Measurement Widget
+
+The Cell-Nucleus Measurement widget computes per-cell features that combine a cell
+segmentation with a nucleus segmentation.  It reports the number of nuclei per cell,
+cell-to-nucleus area/volume ratios, and optionally cytoplasmic vs. nuclear intensity
+statistics.
+
+### Layout (scrollable)
+
+```
+┌─────────────────────────────────────┐
+│ Cell segmentation:      [combo]     │
+│ Nucleus segmentation:   [combo]     │
+│ Intensity image (optional): [combo] │
+│ ┌ Physical pixel/voxel size ──────┐ │
+│ │ Y: [spinbox]                    │ │
+│ │ X: [spinbox]                    │ │
+│ └─────────────────────────────────┘ │
+│ [Measure cell-nucleus]              │
+│ ┌ Measurements ─────────────────┐  │
+│ │  <table>  [Save table]        │  │
+│ └───────────────────────────────┘  │
+└─────────────────────────────────────┘
+```
+
+For 3-D data a third spinbox **Z** is added automatically.
+
+### Workflow
+
+1. Select a **Cell segmentation** layer (Labels) from the first dropdown.  The scale
+   spinboxes are pre-populated from the layer's `scale` attribute if it has been set;
+   otherwise they default to `1.0`.
+2. Select a **Nucleus segmentation** layer (Labels) from the second dropdown.  This layer
+   must have the same spatial dimensions as the cell segmentation.
+3. Optionally select an **Intensity image** layer (Image) from the third dropdown.
+   Choose `(none)` to skip intensity measurements.
+4. Adjust the per-axis scale values if needed (same convention as the Morphology widget).
+5. Click **Measure cell-nucleus**.
+
+The **Measurements** table is filled with one row per cell.
+
+**Columns – without intensity image (2-D)**
+
+| Column | Description |
+|--------|-------------|
+| `label` | Integer cell label ID |
+| `n_nuclei` | Number of nucleus labels overlapping with this cell |
+| `cell_area` | Area of the whole cell in physical units (nucleus included) |
+| `nucleus_area` | Total area of nuclei within this cell in physical units |
+| `area_ratio` | `cell_area / nucleus_area`; `NaN` for cells with no nucleus |
+
+For 3-D data the columns are `cell_volume`, `nucleus_volume`, and `volume_ratio`
+instead.
+
+**Additional columns – with intensity image**
+
+When an intensity image is selected, columns are added for each statistic `{stat}` in
+`mean`, `median`, `max`, `min`, `percentile_10`, `percentile_25`, `percentile_75`,
+`percentile_90`:
+
+| Column | Description |
+|--------|-------------|
+| `cell_{stat}_intensity` | Statistic over the cytoplasmic region (cell pixels where no nucleus is present) |
+| `nucleus_{stat}_intensity` | Statistic over all nuclear pixels within this cell |
+| `{stat}_intensity_ratio` | `cell_{stat}_intensity / nucleus_{stat}_intensity`; `NaN` when either region is empty or the nucleus value is zero |
+
+The table is also registered internally so that the **Threshold Analysis** widget can
+access it directly.
+
+### Saving the table
+
+Click **Save table** to export the measurements (same formats as Intensity Measurement:
+CSV, TSV, Excel).

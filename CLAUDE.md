@@ -64,7 +64,7 @@ The napari plugin provides these feature:
 
 ## Morphology measurement
 
-Takes as input a segmentation. Also the physical scale / pixel size of the segmentation. The default for the scale is 1 (isotropic).
+Takes as input a segmentation. Also the physical scale / pixel size of the segmentation. The default for the scale is 1 (isotropic) but it can be anisotropic with 2 / 3 values in 2d / 3d.
 
 Computes the following morphological features for 2d / 3d:
 volume / area, surface area / circumference, sphericity, solidity, extent of the major axes (ellipsoidal fit), radius of a fit sphere
@@ -73,11 +73,22 @@ The napari plugin widget derives the default values for physical scale from the 
 
 ## Cell-nucleus measurement
 
-Not yet implemented
+Takes as input a cell segmentation and nucleus segmentation as well as the physical scale / pixel size (see morphology measurement for details on pixel size). Takes an intensity image as optinal input.
+
+Computes the following features:
+- The number of nuclei per cell (= nuber of unique nucleus IDs per cell ID, or zero if there are no nuclei in there)
+- The ratio of cell area / volume to nuclear area / volume for each cell ID, respecting the physical scale. Here, the cell area / volume encompasses the nucleus, i.e. the nuclear mask is not excluded.
+- If the intensity image is given: the ratio of mean, median, max, min, percentile intensities between cell and nucleus. For these measurements, the nuclear mask is excluded from the cellular intensities.
+
+The napari plugin implements tis measurement logic as in the other measurement widgets.
 
 # Analysis
 
 The python functions take a pandas dataframe as input, the CLI the path to a saved table. The napari plugin widgets operate on a table that was produced by one of the measurement widgets.
+
+## Filter
+
+Filter outliers from the table based on defined criteria. Not yet implemented.
 
 ## Threshold-based analysis
 
@@ -93,7 +104,7 @@ The napari plugin works as follows:
 
 ## Clustering analysis
 
-Not yet implemented
+Not yet implemented.
 
 ## Classification analysis
 
