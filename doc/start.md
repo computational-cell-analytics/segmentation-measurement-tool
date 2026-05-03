@@ -5,6 +5,7 @@
 - **Post-processing**: filter small segments, remove small holes, compute ring-masks around segments.
 - **Intensity measurements**: per-object mean, median, max, standard deviation, and percentile statistics.
 - **Morphology measurements**: per-object area/volume, perimeter/surface area, sphericity, solidity, axis lengths, and equivalent diameter; supports anisotropic pixel/voxel sizes.
+- **Cell-nucleus measurements**: per-cell nucleus count, cell-to-nucleus area/volume ratio, and optional cytoplasmic vs. nuclear intensity ratios from paired cell and nucleus segmentations.
 - **Threshold analysis**: categorize objects into named groups based on any measurement column using automatic or manual thresholds.
 - **Napari plugin**: interactive widgets for all of the above, with table visualization and export to CSV, TSV, and Excel.
 - **CLI**: command-line interface for all functionality.

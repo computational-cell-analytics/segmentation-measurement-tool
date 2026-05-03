@@ -265,6 +265,99 @@ segmentation-measurement measure morphology \
 
 ---
 
+### `cell-nucleus`
+
+Compute per-cell measurements that combine a cell segmentation with a nucleus
+segmentation.  For each cell, the command reports how many nuclei it contains,
+the cell and nucleus area/volume in physical units, and their ratio.  When an
+optional intensity image is supplied, it also reports intensity statistics for
+the cytoplasmic region (cell minus nucleus) and the nuclear region, together
+with their ratios.
+
+```bash
+segmentation-measurement measure cell-nucleus \
+    --cell-segmentation   cells.tif \
+    --nucleus-segmentation nuclei.tif \
+    --output              cell_nucleus.csv
+```
+
+**Arguments**
+
+| Argument | Type | Required | Description |
+|----------|------|----------|-------------|
+| `--cell-segmentation` | path | yes | Cell segmentation TIFF file (integer labels) |
+| `--nucleus-segmentation` | path | yes | Nucleus segmentation TIFF file (integer labels); must have the same shape as the cell segmentation |
+| `--output` | path | yes | Output table file; format inferred from extension |
+| `--scale` | float(s) | no | Physical pixel/voxel size (default: `1.0`); same syntax as `morphology` |
+| `--intensity` | path | no | Intensity image TIFF file; when provided, per-region intensity statistics and their ratios are included |
+
+**Scale argument**
+
+Identical to the `morphology` sub-command: pass a single value for isotropic
+spacing, or one value per spatial dimension for anisotropic spacing in
+`(Y, X)` / `(Z, Y, X)` order.
+
+**Output columns – without intensity image (2-D)**
+
+| Column | Description |
+|--------|-------------|
+| `label` | Integer cell label |
+| `n_nuclei` | Number of nucleus labels overlapping with this cell |
+| `cell_area` | Area of the cell in physical units (nucleus included) |
+| `nucleus_area` | Total area of nuclei within this cell in physical units |
+| `area_ratio` | `cell_area / nucleus_area`; `NaN` if the cell contains no nucleus |
+
+For 3-D data the columns are `cell_volume`, `nucleus_volume`, and `volume_ratio`
+instead.
+
+**Additional columns – with intensity image**
+
+When `--intensity` is given, the following columns are added for each statistic
+`{stat}` in `mean`, `median`, `max`, `min`, `percentile_10`, `percentile_25`,
+`percentile_75`, `percentile_90`:
+
+| Column | Description |
+|--------|-------------|
+| `cell_{stat}_intensity` | Statistic over the cytoplasmic region (cell pixels where no nucleus is present) |
+| `nucleus_{stat}_intensity` | Statistic over all nuclear pixels within this cell |
+| `{stat}_intensity_ratio` | `cell_{stat}_intensity / nucleus_{stat}_intensity`; `NaN` when either region is empty or the nucleus value is zero |
+
+**Supported output formats** – same as `intensities` (`.csv`, `.tsv`, `.xlsx`).
+
+**Examples**
+
+```bash
+# Basic measurements, pixel units
+segmentation-measurement measure cell-nucleus \
+    --cell-segmentation cells.tif \
+    --nucleus-segmentation nuclei.tif \
+    --output cell_nucleus.csv
+
+# With physical scale (0.5 µm/px, isotropic)
+segmentation-measurement measure cell-nucleus \
+    --cell-segmentation cells.tif \
+    --nucleus-segmentation nuclei.tif \
+    --output cell_nucleus.csv \
+    --scale 0.5
+
+# With intensity ratios
+segmentation-measurement measure cell-nucleus \
+    --cell-segmentation cells.tif \
+    --nucleus-segmentation nuclei.tif \
+    --intensity gfp_channel.tif \
+    --output cell_nucleus_intensity.csv
+
+# Anisotropic 3-D (Z=2 µm, Y=X=0.5 µm) with intensity
+segmentation-measurement measure cell-nucleus \
+    --cell-segmentation cells_3d.tif \
+    --nucleus-segmentation nuclei_3d.tif \
+    --intensity gfp_3d.tif \
+    --output cell_nucleus_3d.csv \
+    --scale 2.0 0.5 0.5
+```
+
+---
+
 ## Analysis (`analyze`)
 
 ### `threshold`
