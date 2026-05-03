@@ -22,6 +22,7 @@ napari = [
     "magicgui",
     "npe2",
     "qtpy",
+    "matplotlib",
 ]
 
 [project.entry-points."console_scripts"]
