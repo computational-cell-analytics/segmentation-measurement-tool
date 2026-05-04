@@ -13,6 +13,10 @@ from segmentation_measurement.postprocessing import (
 from segmentation_measurement.intensity import measure_intensities
 from segmentation_measurement.morphology import measure_morphology
 from segmentation_measurement.cell_nucleus import measure_cell_nucleus
+from segmentation_measurement.table_manipulation import (
+    drop_columns,
+    merge_tables,
+)
 from segmentation_measurement.analysis import (
     apply_classifier,
     categorize_by_threshold,
@@ -29,6 +33,8 @@ __all__ = [
     "measure_intensities",
     "measure_morphology",
     "measure_cell_nucleus",
+    "merge_tables",
+    "drop_columns",
     "suggest_thresholds",
     "categorize_by_threshold",
     "cluster_measurements",

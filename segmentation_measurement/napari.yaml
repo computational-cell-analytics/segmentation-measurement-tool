@@ -23,6 +23,9 @@ contributions:
     - id: segmentation-measurement.classification_widget
       python_name: segmentation_measurement._classification_widget:ClassificationWidget
       title: Classification Analysis
+    - id: segmentation-measurement.table_manipulation_widget
+      python_name: segmentation_measurement._table_manipulation_widget:TableManipulationWidget
+      title: Table Manipulation
   widgets:
     - command: segmentation-measurement.postprocessing_widget
       display_name: Postprocessing
@@ -38,3 +41,5 @@ contributions:
       display_name: Clustering Analysis
     - command: segmentation-measurement.classification_widget
       display_name: Classification Analysis
+    - command: segmentation-measurement.table_manipulation_widget
+      display_name: Table Manipulation

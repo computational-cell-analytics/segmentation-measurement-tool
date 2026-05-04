@@ -30,6 +30,8 @@ Open any widget from the napari menu:
 
 **Plugins → Segmentation Measurement → Classification Analysis → Classification Analysis**
 
+**Plugins → Segmentation Measurement → Table Manipulation → Table Manipulation**
+
 All widgets appear as dockable panels that can be placed anywhere in the napari window.
 
 ---
@@ -636,3 +638,68 @@ above) or used with the `analyze classify` CLI command to apply it to new tables
 
 Click **Save table** to export the measurement table with the `classification_id` and
 `classification_name` columns (CSV, TSV, or Excel).
+
+---
+
+## Table Manipulation Widget
+
+The Table Manipulation widget loads, edits, and combines measurement tables.  It is
+useful for stitching together independently produced measurements (e.g. intensity and
+morphology) into one table that can then be passed to a downstream analysis widget,
+and for cleaning up tables before analysis or export.
+
+### Layout
+
+```
+┌────────────────────────────────────────┐
+│ ┌ Load table ────────────────────────┐ │
+│ │ From plugin: [combo] [Refresh] [Load] │
+│ │ From file:   [Load file…]          │ │
+│ └────────────────────────────────────┘ │
+│ ┌ Current table ─────────────────────┐ │
+│ │ Loaded: <name>                     │ │
+│ │ [QTableWidget]                     │ │
+│ └────────────────────────────────────┘ │
+│ ┌ Drop column ───────────────────────┐ │
+│ │ Column: [combo]   [Drop]           │ │
+│ └────────────────────────────────────┘ │
+│ ┌ Merge with table ──────────────────┐ │
+│ │ Other table: [combo]   [Merge]     │ │
+│ └────────────────────────────────────┘ │
+│ [Save table]                            │
+└────────────────────────────────────────┘
+```
+
+### Loading a table
+
+Two sources are supported:
+
+* **From plugin** — Pick a table that was produced by another widget
+  (Intensity, Morphology, Cell-Nucleus, …).  Click **Refresh** if a recently
+  produced table does not yet appear in the dropdown, then **Load** to
+  display it.
+* **From file** — Click **Load file…** to read a CSV, TSV, or XLSX file.
+  The widget verifies that the file contains a `label` column and refuses
+  to load it otherwise.
+
+After loading, the widget registers the table in the in-memory registry under
+the source name (or the file stem) so that downstream analysis widgets can
+pick it up immediately.
+
+### Dropping a column
+
+Select a column from the **Drop column** dropdown and click **Drop**.  The
+displayed table is updated in place; the change is also propagated back to
+the registered table.  The `label` column is the segment identifier and is
+never offered for dropping.
+
+### Merging another table
+
+Select a registered measurement table from the **Other table** dropdown and
+click **Merge**.  The widget performs an outer join on the `label` column.
+If the other table contains columns that are also in the current table the
+merge is rejected with a dialog — drop the conflicting columns first.
+
+### Saving the table
+
+Click **Save table** to export the current table to CSV, TSV, or Excel.
