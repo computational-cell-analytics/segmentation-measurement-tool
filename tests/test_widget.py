@@ -81,7 +81,8 @@ def test_run_ring_mask(make_napari_viewer, qtbot):
     widget._ring_width_spin.setValue(2)
     widget._run()
     result = viewer.layers["result"].data
-    np.testing.assert_array_equal(result[8:12, 8:12], 0)
+    # Default keep_original=True: original segment pixels are retained
+    np.testing.assert_array_equal(result[8:12, 8:12], 1)
     assert np.any(result == 1)
 
 

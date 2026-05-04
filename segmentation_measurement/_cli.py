@@ -38,7 +38,7 @@ def cmd_ring_mask(args: argparse.Namespace) -> None:
     """Execute the ring-mask sub-command."""
     from segmentation_measurement.postprocessing import compute_ring_mask
     seg = _load_segmentation(args.input)
-    result = compute_ring_mask(seg, args.ring_width)
+    result = compute_ring_mask(seg, args.ring_width, keep_original=not args.remove_original)
     _save_segmentation(result, args.output)
 
 
@@ -213,6 +213,10 @@ def main() -> None:
     rm.add_argument(
         "--ring-width", type=int, required=True,
         help="Width of the ring in pixels/voxels.",
+    )
+    rm.add_argument(
+        "--remove-original", action="store_true", default=False,
+        help="Remove original segment pixels from the output, keeping only the ring pixels.",
     )
     rm.set_defaults(func=cmd_ring_mask)
 

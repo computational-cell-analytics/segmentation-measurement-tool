@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import napari
 from qtpy.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QGroupBox,
     QHBoxLayout,
@@ -85,6 +86,9 @@ class PostprocessingWidget(QWidget):
         self._ring_width_spin.setRange(1, 1000)
         self._ring_width_spin.setValue(5)
         rm_layout.addWidget(self._ring_width_spin)
+        self._keep_original_check = QCheckBox("Keep original")
+        self._keep_original_check.setChecked(True)
+        rm_layout.addWidget(self._keep_original_check)
         rm_group.setLayout(rm_layout)
         self._params_stack.addWidget(rm_group)
 
@@ -138,7 +142,11 @@ class PostprocessingWidget(QWidget):
         elif method == "remove_small_holes":
             result = remove_small_holes(segmentation, self._max_hole_size_spin.value())
         elif method == "ring_mask":
-            result = compute_ring_mask(segmentation, self._ring_width_spin.value())
+            result = compute_ring_mask(
+                segmentation,
+                self._ring_width_spin.value(),
+                keep_original=self._keep_original_check.isChecked(),
+            )
         else:
             return
 

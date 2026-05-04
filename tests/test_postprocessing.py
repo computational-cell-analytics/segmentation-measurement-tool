@@ -101,10 +101,18 @@ class TestComputeRingMask(unittest.TestCase):
     def test_ring_exists_around_segment_2d(self):
         seg = np.zeros((20, 20), dtype=np.int32)
         seg[8:12, 8:12] = 1  # 4x4 segment in center
+        # Default: original pixels are kept
         result = compute_ring_mask(seg, ring_width=2)
-        # Original segment pixels must be absent from the ring mask
+        np.testing.assert_array_equal(result[8:12, 8:12], 1)
+        self.assertTrue(np.any(result[5:8, 8:12] == 1))
+        self.assertTrue(np.any(result[12:15, 8:12] == 1))
+
+    def test_ring_exists_around_segment_2d_remove_original(self):
+        seg = np.zeros((20, 20), dtype=np.int32)
+        seg[8:12, 8:12] = 1
+        result = compute_ring_mask(seg, ring_width=2, keep_original=False)
+        # Original segment pixels must be absent when keep_original=False
         np.testing.assert_array_equal(result[8:12, 8:12], 0)
-        # Ring pixels should surround the segment
         self.assertTrue(np.any(result[5:8, 8:12] == 1))
         self.assertTrue(np.any(result[12:15, 8:12] == 1))
 
@@ -112,20 +120,34 @@ class TestComputeRingMask(unittest.TestCase):
         seg = np.zeros((20, 20), dtype=np.int32)
         seg[2:8, 2:8] = 1
         seg[10:16, 10:16] = 2
-        result = compute_ring_mask(seg, ring_width=3)
-        # Original segment pixels must be absent (ring mask only)
+        # With keep_original=False, only ring pixels appear
+        result = compute_ring_mask(seg, ring_width=3, keep_original=False)
         np.testing.assert_array_equal(result[2:8, 2:8], 0)
         np.testing.assert_array_equal(result[10:16, 10:16], 0)
-        # Every labeled pixel in the result must have been background originally
         self.assertTrue(np.all(seg[result > 0] == 0))
+
+    def test_ring_keeps_original_pixels(self):
+        seg = np.zeros((20, 20), dtype=np.int32)
+        seg[2:8, 2:8] = 1
+        seg[10:16, 10:16] = 2
+        # Default keep_original=True: original segment pixels are in the output
+        result = compute_ring_mask(seg, ring_width=3)
+        np.testing.assert_array_equal(result[2:8, 2:8], 1)
+        np.testing.assert_array_equal(result[10:16, 10:16], 2)
 
     def test_ring_3d(self):
         seg = np.zeros((20, 20, 20), dtype=np.int32)
         seg[8:12, 8:12, 8:12] = 1
+        # Default: original pixels are kept
         result = compute_ring_mask(seg, ring_width=2)
-        # Original segment pixels must be absent from the ring mask
+        np.testing.assert_array_equal(result[8:12, 8:12, 8:12], 1)
+        self.assertTrue(np.any(result == 1))
+
+    def test_ring_3d_remove_original(self):
+        seg = np.zeros((20, 20, 20), dtype=np.int32)
+        seg[8:12, 8:12, 8:12] = 1
+        result = compute_ring_mask(seg, ring_width=2, keep_original=False)
         np.testing.assert_array_equal(result[8:12, 8:12, 8:12], 0)
-        # Ring pixels should exist outside the original segment
         self.assertTrue(np.any(result == 1))
 
     def test_preserves_dtype(self):
@@ -201,7 +223,26 @@ class TestCLI(unittest.TestCase):
                 "--ring-width", "2",
             ])
             out = tifffile.imread(output_path)
-            # Original segment pixels absent; ring pixels present outside them
+            # Default: original segment pixels are kept
+            np.testing.assert_array_equal(out[8:12, 8:12], 1)
+            self.assertTrue(np.any(out == 1))
+
+    def test_ring_mask_cli_remove_original(self):
+        seg = np.zeros((20, 20), dtype=np.int32)
+        seg[8:12, 8:12] = 1
+        with tempfile.TemporaryDirectory() as tmpdir:
+            input_path = os.path.join(tmpdir, "seg.tif")
+            output_path = os.path.join(tmpdir, "out.tif")
+            tifffile.imwrite(input_path, seg)
+            self._call_main([
+                "postprocess", "ring-mask",
+                "--input", input_path,
+                "--output", output_path,
+                "--ring-width", "2",
+                "--remove-original",
+            ])
+            out = tifffile.imread(output_path)
+            # With --remove-original: original pixels absent, ring pixels present
             np.testing.assert_array_equal(out[8:12, 8:12], 0)
             self.assertTrue(np.any(out == 1))
 

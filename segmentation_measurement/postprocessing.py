@@ -65,30 +65,35 @@ def remove_small_holes(segmentation: np.ndarray, max_hole_size: int) -> np.ndarr
     return result
 
 
-def compute_ring_mask(segmentation: np.ndarray, ring_width: int) -> np.ndarray:
+def compute_ring_mask(
+    segmentation: np.ndarray, ring_width: int, keep_original: bool = True
+) -> np.ndarray:
     """Compute the ring mask around each segment.
 
     For each segment, a ring of specified width is computed by dilating the
     segment mask by ``ring_width`` iterations and subtracting the original
-    mask. Only the ring pixels are labeled; original segment pixels are set to
-    zero (background) in the output. This is useful for creating pseudo-cytosol
-    masks around segmented nuclei.
-
-    Ring pixels are only placed on background pixels of the original
+    mask. Ring pixels are only placed on background pixels of the original
     segmentation. If rings from different segments overlap, the segment with
     the smaller label ID takes precedence.
+
+    This is useful for creating pseudo-cytosol masks around segmented nuclei.
 
     Args:
         segmentation (np.ndarray): Integer-valued label array where 0 is
             background and each positive integer represents a distinct segment.
             Supports arbitrary dimensionality.
         ring_width (int): Width of the ring in pixels/voxels.
+        keep_original (bool): If ``True`` (default), original segment pixels
+            are retained in the output alongside the ring pixels. If ``False``,
+            only the ring pixels are labeled and original segment pixels are
+            set to zero (background).
 
     Returns:
-        np.ndarray: Label array containing only the ring regions (original
-            segment pixels are 0), same shape and dtype as input.
+        np.ndarray: Label array containing the ring regions and, when
+            ``keep_original`` is ``True``, also the original segment pixels.
+            Same shape and dtype as input.
     """
-    result = np.zeros_like(segmentation)
+    result = segmentation.copy() if keep_original else np.zeros_like(segmentation)
     for label_id in np.unique(segmentation):
         if label_id == 0:
             continue
