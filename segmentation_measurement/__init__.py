@@ -5,6 +5,7 @@
 """
 
 from segmentation_measurement.postprocessing import (
+    apply_watershed,
     compute_ring_mask,
     filter_small_segments,
     remove_small_holes,
@@ -24,6 +25,7 @@ __all__ = [
     "filter_small_segments",
     "remove_small_holes",
     "compute_ring_mask",
+    "apply_watershed",
     "measure_intensities",
     "measure_morphology",
     "measure_cell_nucleus",

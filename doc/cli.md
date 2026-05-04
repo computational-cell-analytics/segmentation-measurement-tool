@@ -98,9 +98,10 @@ segmentation-measurement postprocess remove-small-holes \
 
 ### `ring-mask`
 
-Compute a ring (annular hull) of a specified width around each segment.  The output
-contains *only* the ring pixels; the original segment interiors are set to `0`.  This is
-useful for creating pseudo-cytoplasm masks from segmented nuclei.
+Compute a ring (annular hull) of a specified width around each segment.  By default the
+original segment pixels are retained in the output alongside the ring pixels.  Pass
+`--remove-original` to produce a ring-only mask (original segment interiors set to `0`).
+This is useful for creating pseudo-cytoplasm masks from segmented nuclei.
 
 Rings are placed only on background pixels; if rings from different segments overlap,
 the segment with the smaller label ID takes precedence.
@@ -119,12 +120,60 @@ segmentation-measurement postprocess ring-mask \
 | `--input` | path | yes | Input segmentation TIFF file |
 | `--output` | path | yes | Output TIFF file for the ring mask |
 | `--ring-width` | int | yes | Width of the ring in pixels/voxels |
+| `--remove-original` | flag | no | Remove original segment pixels; output contains only ring pixels |
 
-**Example** – create 8-pixel-wide rings around nuclei:
+**Example** – create 8-pixel-wide rings around nuclei (original segments kept):
 
 ```bash
 segmentation-measurement postprocess ring-mask \
     --input nuclei.tif --output cytoplasm_rings.tif --ring-width 8
+```
+
+**Example** – ring-only mask (original segments removed):
+
+```bash
+segmentation-measurement postprocess ring-mask \
+    --input nuclei.tif --output rings_only.tif --ring-width 8 --remove-original
+```
+
+---
+
+### `watershed`
+
+Refine a segmentation using the watershed algorithm.  The input segmentation
+is used as seed markers; the heatmap is the topographic landscape that the
+algorithm floods.  Because `skimage.segmentation.watershed` floods from low
+values upward, the heatmap should have **low values at desired segment
+boundaries and high values in the interior**.  If your heatmap has the
+opposite convention (e.g. a distance transform or foreground-probability map
+where high values indicate cell centres), pass the negated image.
+
+An optional binary mask restricts processing to a subset of pixels; unmasked
+pixels are set to 0 in the output.
+
+```bash
+segmentation-measurement postprocess watershed \
+    --input  seeds.tif \
+    --heatmap landscape.tif \
+    --output refined.tif
+```
+
+**Arguments**
+
+| Argument | Type | Required | Description |
+|----------|------|----------|-------------|
+| `--input` | path | yes | Input segmentation TIFF file used as seed markers |
+| `--heatmap` | path | yes | Heatmap image TIFF (low values flooded first) |
+| `--output` | path | yes | Output segmentation TIFF file |
+| `--mask` | path | no | Binary mask TIFF; only masked pixels are processed |
+
+**Example** – watershed refinement with a foreground-probability heatmap
+(negated so high-probability regions are flooded first):
+
+```bash
+# Negate the probability map beforehand, then run watershed
+segmentation-measurement postprocess watershed \
+    --input seeds.tif --heatmap neg_prob.tif --output refined.tif
 ```
 
 ---
