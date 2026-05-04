@@ -10,6 +10,7 @@ import numpy as np
 import tifffile
 
 from segmentation_measurement.postprocessing import (
+    apply_watershed,
     compute_ring_mask,
     filter_small_segments,
     remove_small_holes,
@@ -245,6 +246,95 @@ class TestCLI(unittest.TestCase):
             # With --remove-original: original pixels absent, ring pixels present
             np.testing.assert_array_equal(out[8:12, 8:12], 0)
             self.assertTrue(np.any(out == 1))
+
+    def test_watershed_cli(self):
+        seg = np.zeros((20, 20), dtype=np.int32)
+        seg[5, 5] = 1
+        seg[5, 14] = 2
+        heatmap = np.zeros((20, 20), dtype=np.float32)
+        heatmap[5, 5] = 1.0
+        heatmap[5, 14] = 1.0
+        with tempfile.TemporaryDirectory() as tmpdir:
+            input_path = os.path.join(tmpdir, "seg.tif")
+            heatmap_path = os.path.join(tmpdir, "heatmap.tif")
+            output_path = os.path.join(tmpdir, "out.tif")
+            tifffile.imwrite(input_path, seg)
+            tifffile.imwrite(heatmap_path, heatmap)
+            self._call_main([
+                "postprocess", "watershed",
+                "--input", input_path,
+                "--heatmap", heatmap_path,
+                "--output", output_path,
+            ])
+            out = tifffile.imread(output_path)
+            # Both seed labels must be present in output
+            self.assertIn(1, out)
+            self.assertIn(2, out)
+
+    def test_watershed_cli_with_mask(self):
+        seg = np.zeros((20, 20), dtype=np.int32)
+        seg[5, 5] = 1
+        heatmap = np.zeros((20, 20), dtype=np.float32)
+        mask = np.zeros((20, 20), dtype=np.uint8)
+        mask[0:10, :] = 1  # only top half processed
+        with tempfile.TemporaryDirectory() as tmpdir:
+            input_path = os.path.join(tmpdir, "seg.tif")
+            heatmap_path = os.path.join(tmpdir, "heatmap.tif")
+            mask_path = os.path.join(tmpdir, "mask.tif")
+            output_path = os.path.join(tmpdir, "out.tif")
+            tifffile.imwrite(input_path, seg)
+            tifffile.imwrite(heatmap_path, heatmap)
+            tifffile.imwrite(mask_path, mask)
+            self._call_main([
+                "postprocess", "watershed",
+                "--input", input_path,
+                "--heatmap", heatmap_path,
+                "--mask", mask_path,
+                "--output", output_path,
+            ])
+            out = tifffile.imread(output_path)
+            # Bottom half must be all background due to mask
+            np.testing.assert_array_equal(out[10:, :], 0)
+
+
+class TestApplyWatershed(unittest.TestCase):
+
+    def test_expands_seeds_to_cover_image(self):
+        seg = np.zeros((20, 20), dtype=np.int32)
+        seg[5, 5] = 1
+        seg[5, 14] = 2
+        heatmap = np.zeros((20, 20), dtype=np.float32)
+        result = apply_watershed(seg, heatmap)
+        # Every pixel should be assigned to one of the two labels
+        self.assertEqual(set(np.unique(result)), {1, 2})
+
+    def test_respects_mask(self):
+        seg = np.zeros((20, 20), dtype=np.int32)
+        seg[5, 5] = 1
+        heatmap = np.zeros((20, 20), dtype=np.float32)
+        mask = np.zeros((20, 20), dtype=bool)
+        mask[0:10, :] = True
+        result = apply_watershed(seg, heatmap, mask=mask)
+        # Outside the mask must remain background
+        np.testing.assert_array_equal(result[10:, :], 0)
+        # Inside the mask the seed must have expanded
+        self.assertTrue(np.any(result[0:10, :] == 1))
+
+    def test_preserves_dtype(self):
+        seg = np.zeros((10, 10), dtype=np.int32)
+        seg[5, 5] = 1
+        heatmap = np.zeros((10, 10), dtype=np.float32)
+        result = apply_watershed(seg, heatmap)
+        self.assertEqual(result.dtype, seg.dtype)
+
+    def test_3d(self):
+        seg = np.zeros((10, 10, 10), dtype=np.int32)
+        seg[5, 5, 2] = 1
+        seg[5, 5, 7] = 2
+        heatmap = np.zeros((10, 10, 10), dtype=np.float32)
+        result = apply_watershed(seg, heatmap)
+        self.assertIn(1, result)
+        self.assertIn(2, result)
 
 
 if __name__ == "__main__":

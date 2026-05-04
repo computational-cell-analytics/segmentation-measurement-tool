@@ -42,6 +42,16 @@ def cmd_ring_mask(args: argparse.Namespace) -> None:
     _save_segmentation(result, args.output)
 
 
+def cmd_watershed(args: argparse.Namespace) -> None:
+    """Execute the watershed sub-command."""
+    from segmentation_measurement.postprocessing import apply_watershed
+    seg = _load_segmentation(args.input)
+    heatmap = tifffile.imread(args.heatmap)
+    mask = tifffile.imread(args.mask) if args.mask else None
+    result = apply_watershed(seg, heatmap, mask=mask)
+    _save_segmentation(result, args.output)
+
+
 def cmd_measure_intensities(args: argparse.Namespace) -> None:
     """Execute the measure-intensities sub-command."""
     from segmentation_measurement.intensity import measure_intensities
@@ -219,6 +229,16 @@ def main() -> None:
         help="Remove original segment pixels from the output, keeping only the ring pixels.",
     )
     rm.set_defaults(func=cmd_ring_mask)
+
+    ws = pp_subparsers.add_parser(
+        "watershed",
+        help="Refine segmentation using the watershed algorithm.",
+    )
+    ws.add_argument("--input", required=True, help="Input segmentation file (TIFF) used as seed markers.")
+    ws.add_argument("--heatmap", required=True, help="Heatmap image file (TIFF) used as the watershed landscape.")
+    ws.add_argument("--output", required=True, help="Output segmentation file (TIFF).")
+    ws.add_argument("--mask", default=None, help="Optional binary mask file (TIFF); only masked pixels are processed.")
+    ws.set_defaults(func=cmd_watershed)
 
     # --- measure ---
     meas_parser = subparsers.add_parser("measure", help="Measurement utilities.")

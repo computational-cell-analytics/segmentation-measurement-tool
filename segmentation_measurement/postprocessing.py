@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Optional
+
 import numpy as np
 from scipy.ndimage import binary_dilation
 from skimage.morphology import remove_small_holes as _remove_small_holes
@@ -105,3 +107,38 @@ def compute_ring_mask(
         ring &= (segmentation == 0) & (result == 0)
         result[ring] = label_id
     return result
+
+
+def apply_watershed(
+    segmentation: np.ndarray,
+    heatmap: np.ndarray,
+    mask: Optional[np.ndarray] = None,
+) -> np.ndarray:
+    """Refine a segmentation using the watershed algorithm.
+
+    Uses the input segmentation as seed markers and ``heatmap`` as the
+    topographic landscape for ``skimage.segmentation.watershed``.  The
+    watershed algorithm floods uphill from each marker, so pixels with
+    *low* heatmap values are claimed first.  For heatmaps where high values
+    indicate cell interiors or distance-to-boundary (e.g. a distance
+    transform), pass the negated heatmap so that high-confidence regions are
+    flooded first.
+
+    Args:
+        segmentation (np.ndarray): Integer-valued label array used as seed
+            markers.  0 is background; each positive integer is a distinct
+            seed.  Supports arbitrary dimensionality.
+        heatmap (np.ndarray): Landscape image of the same spatial shape as
+            ``segmentation``.  Low values are flooded before high values.
+        mask (Optional[np.ndarray]): Boolean or binary array of the same
+            shape as ``segmentation``.  Only pixels where ``mask`` is
+            ``True`` are processed; all other pixels are set to 0 in the
+            output.  If ``None`` (default), all pixels are processed.
+
+    Returns:
+        np.ndarray: Refined label array, same shape and dtype as
+            ``segmentation``.
+    """
+    from skimage.segmentation import watershed
+    result = watershed(heatmap, markers=segmentation, mask=mask)
+    return result.astype(segmentation.dtype)

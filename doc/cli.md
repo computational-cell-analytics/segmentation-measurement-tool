@@ -138,6 +138,46 @@ segmentation-measurement postprocess ring-mask \
 
 ---
 
+### `watershed`
+
+Refine a segmentation using the watershed algorithm.  The input segmentation
+is used as seed markers; the heatmap is the topographic landscape that the
+algorithm floods.  Because `skimage.segmentation.watershed` floods from low
+values upward, the heatmap should have **low values at desired segment
+boundaries and high values in the interior**.  If your heatmap has the
+opposite convention (e.g. a distance transform or foreground-probability map
+where high values indicate cell centres), pass the negated image.
+
+An optional binary mask restricts processing to a subset of pixels; unmasked
+pixels are set to 0 in the output.
+
+```bash
+segmentation-measurement postprocess watershed \
+    --input  seeds.tif \
+    --heatmap landscape.tif \
+    --output refined.tif
+```
+
+**Arguments**
+
+| Argument | Type | Required | Description |
+|----------|------|----------|-------------|
+| `--input` | path | yes | Input segmentation TIFF file used as seed markers |
+| `--heatmap` | path | yes | Heatmap image TIFF (low values flooded first) |
+| `--output` | path | yes | Output segmentation TIFF file |
+| `--mask` | path | no | Binary mask TIFF; only masked pixels are processed |
+
+**Example** – watershed refinement with a foreground-probability heatmap
+(negated so high-probability regions are flooded first):
+
+```bash
+# Negate the probability map beforehand, then run watershed
+segmentation-measurement postprocess watershed \
+    --input seeds.tif --heatmap neg_prob.tif --output refined.tif
+```
+
+---
+
 ## Measurements (`measure`)
 
 ### `intensities`

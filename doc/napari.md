@@ -100,6 +100,21 @@ commonly used to create pseudo-cytoplasm masks around segmented nuclei.
   the output alongside the ring pixels.  Uncheck to produce a ring-only mask where the
   original segment interiors are set to `0`.
 
+#### Watershed
+
+Refines a segmentation using the watershed algorithm.  The selected input
+segmentation is used as seed markers; a separate heatmap image layer provides
+the topographic landscape.  The algorithm floods from low heatmap values
+upward, so the heatmap should have **low values at segment boundaries**.  If
+your heatmap instead has high values at object centres (e.g. a distance
+transform or foreground-probability map), negate it before passing it to the
+widget.
+
+* **Heatmap** – Image layer used as the watershed landscape (low values flooded first).
+* **Mask (optional)** – Label layer whose footprint restricts processing.
+  Pixels outside the mask are set to 0 in the output.  Select **None** to
+  process all pixels (default).
+
 ---
 
 ## Intensity Measurement Widget

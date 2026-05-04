@@ -52,6 +52,7 @@ class PostprocessingWidget(QWidget):
             "filter_small_segments",
             "remove_small_holes",
             "ring_mask",
+            "watershed",
         ])
         self._method_combo.currentIndexChanged.connect(self._on_method_changed)
         method_layout.addWidget(self._method_combo)
@@ -92,6 +93,21 @@ class PostprocessingWidget(QWidget):
         rm_group.setLayout(rm_layout)
         self._params_stack.addWidget(rm_group)
 
+        ws_group = QGroupBox("Parameters")
+        ws_layout = QVBoxLayout()
+        ws_heatmap_layout = QHBoxLayout()
+        ws_heatmap_layout.addWidget(QLabel("Heatmap:"))
+        self._ws_heatmap_combo = QComboBox()
+        ws_heatmap_layout.addWidget(self._ws_heatmap_combo)
+        ws_layout.addLayout(ws_heatmap_layout)
+        ws_mask_layout = QHBoxLayout()
+        ws_mask_layout.addWidget(QLabel("Mask (optional):"))
+        self._ws_mask_combo = QComboBox()
+        ws_mask_layout.addWidget(self._ws_mask_combo)
+        ws_layout.addLayout(ws_mask_layout)
+        ws_group.setLayout(ws_layout)
+        self._params_stack.addWidget(ws_group)
+
         layout.addWidget(self._params_stack)
 
         self._run_btn = QPushButton("Run")
@@ -102,9 +118,12 @@ class PostprocessingWidget(QWidget):
         self._params_stack.setCurrentIndex(index)
 
     def _update_layer_combos(self, event: object = None) -> None:
-        from napari.layers import Labels
+        from napari.layers import Image, Labels
         label_layers = [
             layer.name for layer in self._viewer.layers if isinstance(layer, Labels)
+        ]
+        image_layers = [
+            layer.name for layer in self._viewer.layers if isinstance(layer, Image)
         ]
 
         current_input = self._input_combo.currentText()
@@ -121,8 +140,22 @@ class PostprocessingWidget(QWidget):
         if current_output:
             self._output_combo.setCurrentText(current_output)
 
+        current_heatmap = self._ws_heatmap_combo.currentText()
+        self._ws_heatmap_combo.clear()
+        self._ws_heatmap_combo.addItems(image_layers)
+        if current_heatmap in image_layers:
+            self._ws_heatmap_combo.setCurrentText(current_heatmap)
+
+        current_mask = self._ws_mask_combo.currentText()
+        self._ws_mask_combo.clear()
+        self._ws_mask_combo.addItem("None")
+        self._ws_mask_combo.addItems(label_layers)
+        if current_mask and current_mask in label_layers:
+            self._ws_mask_combo.setCurrentText(current_mask)
+
     def _run(self) -> None:
         from segmentation_measurement.postprocessing import (
+            apply_watershed,
             compute_ring_mask,
             filter_small_segments,
             remove_small_holes,
@@ -147,6 +180,14 @@ class PostprocessingWidget(QWidget):
                 self._ring_width_spin.value(),
                 keep_original=self._keep_original_check.isChecked(),
             )
+        elif method == "watershed":
+            heatmap_name = self._ws_heatmap_combo.currentText()
+            if not heatmap_name:
+                return
+            heatmap = self._viewer.layers[heatmap_name].data
+            mask_name = self._ws_mask_combo.currentText()
+            mask = self._viewer.layers[mask_name].data if mask_name != "None" else None
+            result = apply_watershed(segmentation, heatmap, mask=mask)
         else:
             return
 
