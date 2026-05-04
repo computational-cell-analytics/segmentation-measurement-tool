@@ -14,12 +14,13 @@ After installation the `segmentation-measurement` command is available in your s
 
 ## Overview
 
-The CLI exposes three top-level commands:
+The CLI exposes four top-level commands:
 
 | Command | Description |
 |---------|-------------|
 | `postprocess` | Apply post-processing operations to segmentation TIFF files |
 | `measure` | Compute per-segment measurements from segmentation TIFF files |
+| `table` | Manipulate measurement tables (merge tables, drop columns) |
 | `analyze` | Analyze measurement tables (threshold-based categorization, clustering, classification) |
 
 Run any command with `--help` to see its full usage:
@@ -403,6 +404,58 @@ segmentation-measurement measure cell-nucleus \
     --intensity gfp_3d.tif \
     --output cell_nucleus_3d.csv \
     --scale 2.0 0.5 0.5
+```
+
+---
+
+## Table manipulation (`table`)
+
+The `table` command operates on saved measurement tables (CSV / TSV / XLSX).
+
+### `merge`
+
+Merge one or more saved measurement tables on a shared key column (`label` by
+default) and optionally drop columns from the merged result.  The merge is an
+outer join: label IDs that appear in only some inputs are kept, with NaNs in
+the missing columns.  Non-key columns must be disjoint between input tables —
+drop conflicts beforehand or via `--drop-columns`.
+
+When only one input is given the command becomes a column-drop utility,
+useful for cleaning up an existing table.  The `label` column is the segment
+identifier and is always preserved — passing it to `--drop-columns` raises an
+error.
+
+```bash
+segmentation-measurement table merge \
+    --inputs intensity.csv morphology.csv \
+    --output combined.csv
+```
+
+**Arguments**
+
+| Argument | Type | Required | Description |
+|----------|------|----------|-------------|
+| `--inputs` | path… | yes | One or more input table files (CSV, TSV, XLSX) |
+| `--output` | path | yes | Output table file (extension picks the format) |
+| `--on` | str | no | Key column shared between input tables (default: `label`) |
+| `--drop-columns` | str… | no | Columns to drop from the merged table |
+
+**Example** — merge intensity and morphology tables and drop a column:
+
+```bash
+segmentation-measurement table merge \
+    --inputs intensity.csv morphology.csv \
+    --output combined.csv \
+    --drop-columns std_intensity
+```
+
+**Example** — drop a column from a single existing table:
+
+```bash
+segmentation-measurement table merge \
+    --inputs combined.csv \
+    --output trimmed.csv \
+    --drop-columns std_intensity max_intensity
 ```
 
 ---

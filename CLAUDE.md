@@ -3,9 +3,9 @@
 This repository provides common functionality for post-processing, measurements, and analysis of instance segmentations for microscopy image analysis. The functionality is currently being implemented.
 
 Specifically, it provides / will provide the following functionality:
-- Post-processing segmentations, such as size filtering, filling small holes, and computing a ring-mask across segments.
 - Common post-processing operations such as size filtering and hole-closing.
 - Common measurements, such as morphology, intensity, and combined cytosol and nucleus features.
+- Table manipulations that operate on the measurement outputs.
 - Analysis functionality such as thresholding, clustering, and classification, based on the measureents.
 
 For each utility the following entrypoints are provided:
@@ -82,15 +82,30 @@ Computes the following features:
 
 The napari plugin implements tis measurement logic as in the other measurement widgets.
 
+# Table manipulation
+
+Functionality that operates on the tables from one or multiple measurement functions.
+
+## Basic table manipulation
+
+The napari plugin widget supports:
+- Loading a table from file. Check for presence of a label column.
+- Alternatively, take a table from a measurement plugin.
+- Merge table from a measurement plugin into the currently opened tale. E.g. to combine intensity and morphology measurements.
+- Drop a column from the table (in-place)
+
+The corresponding CLI can merge saved tables, optionally drop coloumns, and save the result table.
+
+## QC / Filtering
+
+Widget for filtering rows, from tables based on specified criteria. Either one or multiple criteria (use pandas query syntax), or outlier detection.
+Implies that analysis widgets will need to handle missing rows (= missing IDs that are present in the segmentation). Not yet implemented.
+
 # Analysis
 
 The python functions take a pandas dataframe as input, the CLI the path to a saved table. The napari plugin widgets operate on a table that was produced by one of the measurement widgets.
 
 Make sure to use utility functions for shared functionality, like accessing the tables in napari.
-
-## Filter
-
-Filter outliers from the table based on defined criteria. Not yet implemented.
 
 ## Threshold-based analysis
 

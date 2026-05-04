@@ -152,6 +152,22 @@ def cmd_analyze_train_classifier(args: argparse.Namespace) -> None:
     joblib.dump(classifier, args.output)
 
 
+def cmd_table_merge(args: argparse.Namespace) -> None:
+    """Execute the table-merge sub-command."""
+    from segmentation_measurement.table_manipulation import (
+        drop_columns,
+        merge_tables,
+    )
+    frames = [load_table(p) for p in args.inputs]
+    if len(frames) == 1:
+        result = frames[0]
+    else:
+        result = merge_tables(frames, on=args.on)
+    if args.drop_columns:
+        result = drop_columns(result, list(args.drop_columns))
+    save_table(result, args.output)
+
+
 def cmd_analyze_threshold(args: argparse.Namespace) -> None:
     """Execute the analyze-threshold sub-command."""
     from segmentation_measurement.analysis import (
@@ -301,6 +317,33 @@ def main() -> None:
         help="Optional intensity image TIFF file.",
     )
     cell_nuc_meas.set_defaults(func=cmd_measure_cell_nucleus)
+
+    # --- table ---
+    table_parser = subparsers.add_parser("table", help="Table manipulation utilities.")
+    table_subparsers = table_parser.add_subparsers(dest="subcommand")
+    table_subparsers.required = True
+
+    merge_parser = table_subparsers.add_parser(
+        "merge",
+        help="Merge multiple measurement tables and optionally drop columns.",
+    )
+    merge_parser.add_argument(
+        "--inputs", nargs="+", required=True,
+        help="Input table files (CSV, TSV, or XLSX). At least one required.",
+    )
+    merge_parser.add_argument(
+        "--output", required=True,
+        help="Output table file (CSV by default; TSV or XLSX by extension).",
+    )
+    merge_parser.add_argument(
+        "--on", default="label",
+        help="Key column shared between input tables (default: label).",
+    )
+    merge_parser.add_argument(
+        "--drop-columns", nargs="+", default=None,
+        help="Optional list of column names to drop from the merged table.",
+    )
+    merge_parser.set_defaults(func=cmd_table_merge)
 
     # --- analyze ---
     analyze_parser = subparsers.add_parser("analyze", help="Analysis utilities.")
