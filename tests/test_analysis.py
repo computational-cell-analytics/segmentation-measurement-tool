@@ -16,7 +16,7 @@ class TestSuggestThresholds(unittest.TestCase):
 
     def _make_measurements(self):
         return pd.DataFrame({
-            "label": np.arange(1, 11),
+            "index": np.arange(1, 11),
             "mean_intensity": np.linspace(0.0, 100.0, 10),
         })
 
@@ -50,7 +50,7 @@ class TestSuggestThresholds(unittest.TestCase):
 
     def test_works_with_morphology_columns(self):
         df = pd.DataFrame({
-            "label": [1, 2, 3],
+            "index": [1, 2, 3],
             "area": [100.0, 200.0, 300.0],
         })
         thresholds = suggest_thresholds(df, "area", 3)
@@ -61,7 +61,7 @@ class TestCategorizeByThreshold(unittest.TestCase):
 
     def _make_measurements(self):
         return pd.DataFrame({
-            "label": [1, 2, 3, 4, 5],
+            "index": [1, 2, 3, 4, 5],
             "mean_intensity": [10.0, 30.0, 50.0, 70.0, 90.0],
         })
 
@@ -131,12 +131,27 @@ class TestCategorizeByThreshold(unittest.TestCase):
 
     def test_works_with_morphology_columns(self):
         df = pd.DataFrame({
-            "label": [1, 2, 3],
+            "index": [1, 2, 3],
             "area": [100.0, 200.0, 300.0],
         })
         result = categorize_by_threshold(df, "area", [150.0])
         self.assertEqual(result[result["area"] == 100.0].iloc[0]["category_id"], 1)
         self.assertEqual(result[result["area"] == 300.0].iloc[0]["category_id"], 2)
+
+    def test_nan_rows_get_zero_category(self):
+        """Rows with NaN in the chosen column (e.g. background padding) are
+        not categorized: ``category_id=0`` and ``category_name=''``."""
+        df = pd.DataFrame({
+            "index": [0, 1, 2, 3],
+            "mean_intensity": [float("nan"), 10.0, 30.0, 90.0],
+        })
+        result = categorize_by_threshold(df, "mean_intensity", [50.0])
+        self.assertEqual(int(result.loc[0, "category_id"]), 0)
+        self.assertEqual(result.loc[0, "category_name"], "")
+        # Other rows are categorized normally.
+        self.assertEqual(int(result.loc[1, "category_id"]), 1)
+        self.assertEqual(int(result.loc[2, "category_id"]), 1)
+        self.assertEqual(int(result.loc[3, "category_id"]), 2)
 
 
 class TestAnalysisCLI(unittest.TestCase):
@@ -148,7 +163,7 @@ class TestAnalysisCLI(unittest.TestCase):
 
     def test_threshold_cli_csv(self):
         df = pd.DataFrame({
-            "label": [1, 2, 3, 4],
+            "index": [1, 2, 3, 4],
             "mean_intensity": [10.0, 30.0, 70.0, 90.0],
         })
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -174,7 +189,7 @@ class TestAnalysisCLI(unittest.TestCase):
 
     def test_threshold_cli_auto_suggest(self):
         df = pd.DataFrame({
-            "label": [1, 2, 3, 4, 5, 6],
+            "index": [1, 2, 3, 4, 5, 6],
             "area": [10.0, 20.0, 30.0, 40.0, 50.0, 60.0],
         })
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -197,7 +212,7 @@ class TestAnalysisCLI(unittest.TestCase):
         seg[1:5, 1:5] = 1
         seg[5:9, 5:9] = 2
         df = pd.DataFrame({
-            "label": [1, 2],
+            "index": [1, 2],
             "mean_intensity": [10.0, 90.0],
         })
         with tempfile.TemporaryDirectory() as tmpdir:

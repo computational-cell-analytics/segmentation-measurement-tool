@@ -29,11 +29,11 @@ class TestMeasureMorphology2D(unittest.TestCase):
         seg[12:18, 12:18] = 2
         result = measure_morphology(seg)
         self.assertEqual(len(result), 2)
-        self.assertSetEqual(set(result["label"]), {1, 2})
+        self.assertSetEqual(set(result["index"]), {1, 2})
 
     def test_required_columns_2d(self):
         result = measure_morphology(self._make_square_2d())
-        for col in ["label", "area", "perimeter", "sphericity", "solidity",
+        for col in ["index", "area", "perimeter", "sphericity", "solidity",
                     "axis_major_length", "axis_minor_length", "equivalent_diameter"]:
             self.assertIn(col, result.columns)
 
@@ -77,7 +77,7 @@ class TestMeasureMorphology2D(unittest.TestCase):
         seg = np.zeros((10, 10), dtype=np.int32)
         result = measure_morphology(seg)
         self.assertEqual(len(result), 0)
-        self.assertIn("label", result.columns)
+        self.assertIn("index", result.columns)
 
     def test_raises_on_unsupported_ndim(self):
         with self.assertRaises(ValueError):
@@ -101,7 +101,7 @@ class TestMeasureMorphology3D(unittest.TestCase):
 
     def test_required_columns_3d(self):
         result = measure_morphology(self._make_cube_3d())
-        for col in ["label", "volume", "surface_area", "sphericity", "solidity",
+        for col in ["index", "volume", "surface_area", "sphericity", "solidity",
                     "axis_major_length", "axis_minor_length", "equivalent_diameter"]:
             self.assertIn(col, result.columns)
 

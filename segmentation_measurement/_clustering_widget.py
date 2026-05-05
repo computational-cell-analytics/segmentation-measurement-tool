@@ -8,7 +8,6 @@ import napari
 from qtpy.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
-    QFileDialog,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -17,34 +16,33 @@ from qtpy.QtWidgets import (
     QScrollArea,
     QSpinBox,
     QStackedWidget,
-    QTableWidget,
     QVBoxLayout,
     QWidget,
 )
 
-from segmentation_measurement._utils import (
-    get_registered_tables,
-    populate_table_widget,
-    save_table,
+from segmentation_measurement._layer_features import (
+    merge_features_into_layer,
+    show_features_table,
 )
 
 
 class ClusteringWidget(QWidget):
     """Widget for clustering segments by their measurement features.
 
-    Operates on tables registered by measurement widgets.  Use the Refresh
-    button to pick up newly produced tables, select a clustering method, then
-    click *Cluster* to run clustering, colour the feature scatter plot, and
-    create an output label layer.
+    Operates on the ``features`` table of the selected Labels layer.  After
+    clustering, the resulting ``cluster_id`` column is merged back into the
+    source layer's ``features`` and a new label layer is created that colours
+    each segment by its cluster.  The 2-D feature reduction scatter plot is
+    coloured to match.
     """
 
     def __init__(self, napari_viewer: napari.Viewer) -> None:
         super().__init__()
         self._viewer = napari_viewer
-        self._measurements: pd.DataFrame | None = None
         self._embedding: np.ndarray | None = None
         self._cluster_ids: np.ndarray | None = None
         self._cluster_colors: dict[int, tuple] = {}
+        self._last_seg_name: str = ""
         self._fig = None
         self._ax = None
         self._canvas = None
@@ -66,39 +64,13 @@ class ClusteringWidget(QWidget):
         layout = QVBoxLayout()
         inner.setLayout(layout)
 
-        # --- Table selection ---
-        table_group = QGroupBox("Measurement table")
-        table_layout = QVBoxLayout()
-
-        sel_layout = QHBoxLayout()
-        sel_layout.addWidget(QLabel("Table:"))
-        self._table_combo = QComboBox()
-        self._table_combo.currentTextChanged.connect(self._on_table_selected)
-        sel_layout.addWidget(self._table_combo)
-        refresh_btn = QPushButton("Refresh")
-        refresh_btn.clicked.connect(self._refresh_table_combo)
-        sel_layout.addWidget(refresh_btn)
-        table_layout.addLayout(sel_layout)
-
-        self._table = QTableWidget()
-        self._table.setMinimumHeight(120)
-        table_layout.addWidget(self._table)
-
-        save_btn = QPushButton("Save table")
-        save_btn.clicked.connect(self._save_table)
-        table_layout.addWidget(save_btn)
-
-        table_group.setLayout(table_layout)
-        layout.addWidget(table_group)
-
-        # --- Segmentation selection ---
         seg_layout = QHBoxLayout()
         seg_layout.addWidget(QLabel("Segmentation:"))
         self._seg_combo = QComboBox()
+        self._seg_combo.currentTextChanged.connect(self._on_seg_selected)
         seg_layout.addWidget(self._seg_combo)
         layout.addLayout(seg_layout)
 
-        # --- Feature reduction plot ---
         reduction_group = QGroupBox("Feature reduction")
         reduction_layout = QVBoxLayout()
 
@@ -117,7 +89,6 @@ class ClusteringWidget(QWidget):
         reduction_group.setLayout(reduction_layout)
         layout.addWidget(reduction_group)
 
-        # --- Clustering parameters ---
         cluster_group = QGroupBox("Clustering")
         cluster_layout = QVBoxLayout()
 
@@ -241,54 +212,55 @@ class ClusteringWidget(QWidget):
     def _on_reduction_method_changed(self) -> None:
         self._embedding = None
 
+    def _on_seg_selected(self, name: str) -> None:
+        # Ignore spurious events caused by combo repopulation in
+        # _update_seg_combo (it briefly clears the combo).  Only reset state
+        # when the user actually picks a different layer.
+        if not name or name == self._last_seg_name:
+            return
+        self._last_seg_name = name
+        self._embedding = None
+        self._cluster_ids = None
+        self._cluster_colors = {}
+        self._update_scatter()
+
     def _update_seg_combo(self, event: object = None) -> None:
         from napari.layers import Labels
         label_layers = [
             layer.name for layer in self._viewer.layers if isinstance(layer, Labels)
         ]
         current = self._seg_combo.currentText()
+        self._seg_combo.blockSignals(True)
         self._seg_combo.clear()
         self._seg_combo.addItems(label_layers)
         if current in label_layers:
             self._seg_combo.setCurrentText(current)
+        self._seg_combo.blockSignals(False)
 
-    def _refresh_table_combo(self) -> None:
-        tables = get_registered_tables()
-        current = self._table_combo.currentText()
-        self._table_combo.blockSignals(True)
-        self._table_combo.clear()
-        self._table_combo.addItems(list(tables.keys()))
-        if current in tables:
-            self._table_combo.setCurrentText(current)
-        self._table_combo.blockSignals(False)
-        self._on_table_selected(self._table_combo.currentText())
-
-    def _on_table_selected(self, name: str) -> None:
-        if not name:
-            return
-        tables = get_registered_tables()
-        if name not in tables:
-            return
-        self._measurements = tables[name].copy()
-        self._embedding = None
-        self._cluster_ids = None
-        self._cluster_colors = {}
-        populate_table_widget(self._table, self._measurements)
-        self._update_scatter()
+    def _current_features(self) -> pd.DataFrame | None:
+        seg_name = self._seg_combo.currentText()
+        if not seg_name or seg_name not in [l.name for l in self._viewer.layers]:
+            return None
+        layer = self._viewer.layers[seg_name]
+        feats = getattr(layer, "features", None)
+        if feats is None or len(feats.columns) == 0:
+            return None
+        return feats
 
     # --- Embedding ---
 
     def _get_feature_matrix(self) -> np.ndarray | None:
-        if self._measurements is None:
+        feats = self._current_features()
+        if feats is None:
             return None
         from segmentation_measurement.analysis import _CLUSTER_EXCLUDE
         feature_cols = [
-            c for c in self._measurements.select_dtypes(include="number").columns
+            c for c in feats.select_dtypes(include="number").columns
             if c not in _CLUSTER_EXCLUDE
         ]
         if not feature_cols:
             return None
-        return self._measurements[feature_cols].values.astype(float)
+        return feats[feature_cols].values.astype(float)
 
     def _compute_embedding(self) -> np.ndarray | None:
         X = self._get_feature_matrix()
@@ -297,7 +269,6 @@ class ClusteringWidget(QWidget):
         valid_mask = ~np.isnan(X).any(axis=1)
         n_valid = int(valid_mask.sum())
         n_feat = X.shape[1]
-        # Need at least 2 samples and 2 features for a 2-D embedding
         if n_valid < 2 or n_feat < 2:
             return None
 
@@ -313,7 +284,6 @@ class ClusteringWidget(QWidget):
                 reducer = umap_lib.UMAP(n_components=2, random_state=42)
                 embedding[valid_mask] = reducer.fit_transform(X_valid)
             except ImportError:
-                # fall back to PCA when umap-learn is not installed
                 from sklearn.decomposition import PCA
                 embedding[valid_mask] = PCA(n_components=2).fit_transform(X_valid)
         elif method == "TSNE":
@@ -339,14 +309,15 @@ class ClusteringWidget(QWidget):
             return
         self._ax.clear()
 
-        if self._measurements is None or self._embedding is None:
+        feats = self._current_features()
+        if feats is None or self._embedding is None:
             self._canvas.draw()
             return
 
         valid_mask = ~np.isnan(self._embedding).any(axis=1)
         emb = self._embedding[valid_mask]
 
-        if cluster_ids is None or len(cluster_ids) != len(self._measurements):
+        if cluster_ids is None or len(cluster_ids) != len(feats):
             self._ax.scatter(emb[:, 0], emb[:, 1], c="steelblue", s=10, alpha=0.7)
         else:
             c_ids = cluster_ids[valid_mask]
@@ -387,7 +358,12 @@ class ClusteringWidget(QWidget):
 
     def _run_clustering(self) -> None:
         from segmentation_measurement.analysis import cluster_measurements
-        if self._measurements is None:
+        seg_name = self._seg_combo.currentText()
+        if not seg_name:
+            return
+        seg_layer = self._viewer.layers[seg_name]
+        feats = self._current_features()
+        if feats is None:
             return
 
         method_map = {
@@ -397,26 +373,24 @@ class ClusteringWidget(QWidget):
             "Mean Shift": "mean_shift",
         }
         method = method_map[self._method_combo.currentText()]
-        self._measurements = cluster_measurements(
-            self._measurements, method=method, **self._get_method_kwargs()
+        clustered = cluster_measurements(
+            feats, method=method, **self._get_method_kwargs()
         )
-        populate_table_widget(self._table, self._measurements)
-        self._cluster_ids = self._measurements["cluster_id"].values.copy()
+        merge_features_into_layer(
+            seg_layer, clustered[["index", "cluster_id"]]
+        )
+        self._cluster_ids = clustered["cluster_id"].values.copy()
 
         if self._embedding is None:
             self._embedding = self._compute_embedding()
         self._update_scatter(self._cluster_ids)
 
-        seg_name = self._seg_combo.currentText()
-        if not seg_name:
-            return
-        segmentation = self._viewer.layers[seg_name].data
+        segmentation = seg_layer.data
         result = np.zeros_like(segmentation)
         for label_id, cluster_id in zip(
-            self._measurements["label"].values,
-            self._measurements["cluster_id"].values,
+            clustered["index"].values,
+            clustered["cluster_id"].values,
         ):
-            # cluster_id is 1-based; noise (-1) stays as background (0)
             if int(cluster_id) > 0:
                 result[segmentation == int(label_id)] = int(cluster_id)
 
@@ -428,18 +402,8 @@ class ClusteringWidget(QWidget):
         else:
             layer = self._viewer.add_labels(result, name=out_name)
 
-        # Apply cluster colours to label layer so they match the scatter plot
         _apply_cluster_colors(layer, self._cluster_colors)
-
-    def _save_table(self) -> None:
-        if self._measurements is None:
-            return
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Save table", "",
-            "CSV (*.csv);;TSV (*.tsv);;Excel (*.xlsx);;All Files (*)",
-        )
-        if path:
-            save_table(self._measurements, path)
+        show_features_table(self._viewer, seg_layer)
 
 
 def _get_cluster_colors(n: int) -> list[tuple]:
@@ -464,7 +428,6 @@ def _apply_cluster_colors(layer: object, cluster_colors: dict[int, tuple]) -> No
     try:
         import numpy as np
         from napari.utils.colormaps import DirectLabelColormap
-        # Background (label 0 / None) → transparent
         color_dict: dict = {None: np.zeros(4)}
         for cid, rgba in cluster_colors.items():
             if cid > 0:

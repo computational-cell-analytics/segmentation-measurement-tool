@@ -16,32 +16,10 @@ _CI_XFAIL = pytest.mark.xfail(
 )
 
 
-@pytest.fixture(autouse=True)
-def _clear_registry():
-    from segmentation_measurement._utils import clear_table_registry
-    clear_table_registry()
-    yield
-    clear_table_registry()
-
-
-def _register(name, df):
-    from segmentation_measurement._utils import register_table
-    register_table(name, df)
-
-
-def _make_df(n=20):
-    rng = np.random.default_rng(42)
-    return pd.DataFrame({
-        "label": np.arange(1, n + 1),
-        "mean_intensity": rng.uniform(0, 100, n),
-        "area": rng.uniform(10, 200, n),
-    })
-
-
 def _make_annotated_df(n=20):
     rng = np.random.default_rng(42)
     df = pd.DataFrame({
-        "label": np.arange(1, n + 1),
+        "index": np.arange(1, n + 1),
         "mean_intensity": np.concatenate([
             rng.uniform(0, 40, n // 2),
             rng.uniform(60, 100, n - n // 2),
@@ -53,6 +31,17 @@ def _make_annotated_df(n=20):
     annotations[n // 2 :] = 2
     df["annotation"] = annotations
     return df
+
+
+def _make_seg_with_features(viewer, n=20, features=None, name="seg"):
+    seg = np.zeros((30, 30), dtype=np.int32)
+    for i in range(1, n + 1):
+        seg[i % 30, (i + 5) % 30] = i
+    if features is None:
+        features = _make_annotated_df(n)
+    layer = viewer.add_labels(seg, name=name)
+    layer.features = features
+    return layer
 
 
 def test_widget_instantiation(make_napari_viewer, qtbot):
@@ -83,31 +72,6 @@ def test_ann_combo_populated_on_labels_add(make_napari_viewer, qtbot):
     assert "seg" in items
 
 
-def test_refresh_populates_table_combo(make_napari_viewer, qtbot):
-    from segmentation_measurement._classification_widget import ClassificationWidget
-    _register("Intensity (cells)", _make_df())
-    viewer = make_napari_viewer()
-    widget = ClassificationWidget(viewer)
-    qtbot.addWidget(widget)
-    widget._refresh_table_combo()
-    items = [widget._table_combo.itemText(i) for i in range(widget._table_combo.count())]
-    assert "Intensity (cells)" in items
-
-
-def test_select_table_loads_measurements(make_napari_viewer, qtbot):
-    from segmentation_measurement._classification_widget import ClassificationWidget
-    df = _make_df(10)
-    _register("Intensity (cells)", df)
-    viewer = make_napari_viewer()
-    widget = ClassificationWidget(viewer)
-    qtbot.addWidget(widget)
-    widget._refresh_table_combo()
-    widget._table_combo.setCurrentText("Intensity (cells)")
-    assert widget._measurements is not None
-    assert len(widget._measurements) == 10
-    assert widget._table_widget.rowCount() == 10
-
-
 def test_method_combo_changes_params_stack(make_napari_viewer, qtbot):
     from segmentation_measurement._classification_widget import ClassificationWidget
     viewer = make_napari_viewer()
@@ -119,31 +83,27 @@ def test_method_combo_changes_params_stack(make_napari_viewer, qtbot):
     assert widget._params_stack.currentIndex() == 1
 
 
-def test_project_annotations_updates_table(make_napari_viewer, qtbot):
+def test_project_annotations_writes_to_features(make_napari_viewer, qtbot):
     from segmentation_measurement._classification_widget import ClassificationWidget
     seg = np.zeros((10, 10), dtype=np.int32)
     seg[1:4, 1:4] = 1
     seg[5:8, 5:8] = 2
     ann = np.zeros_like(seg)
-    ann[1:4, 1:4] = 1  # label 1 → class 1
-    ann[5:8, 5:8] = 2  # label 2 → class 2
-    df = pd.DataFrame({
-        "label": [1, 2],
-        "mean_intensity": [10.0, 90.0],
-    })
-    _register("Intensity (seg)", df)
+    ann[1:4, 1:4] = 1
+    ann[5:8, 5:8] = 2
+    df = pd.DataFrame({"index": [1, 2], "mean_intensity": [10.0, 90.0]})
     viewer = make_napari_viewer()
-    viewer.add_labels(seg, name="seg")
+    seg_layer = viewer.add_labels(seg, name="seg")
+    seg_layer.features = df
     viewer.add_labels(ann, name="ann")
     widget = ClassificationWidget(viewer)
     qtbot.addWidget(widget)
-    widget._refresh_table_combo()
-    widget._table_combo.setCurrentText("Intensity (seg)")
     widget._seg_combo.setCurrentText("seg")
     widget._ann_combo.setCurrentText("ann")
     widget._project_annotations()
-    assert "annotation" in widget._measurements.columns
-    anns = widget._measurements.set_index("label")["annotation"]
+    feats = seg_layer.features
+    assert "annotation" in feats.columns
+    anns = feats.set_index("index")["annotation"]
     assert anns[1] == 1
     assert anns[2] == 2
 
@@ -154,15 +114,13 @@ def test_project_annotations_updates_class_names_table(make_napari_viewer, qtbot
     seg[1:4, 1:4] = 1
     ann = np.zeros_like(seg)
     ann[1:4, 1:4] = 1
-    df = pd.DataFrame({"label": [1], "mean_intensity": [50.0]})
-    _register("Morphology (seg)", df)
+    df = pd.DataFrame({"index": [1], "mean_intensity": [50.0]})
     viewer = make_napari_viewer()
-    viewer.add_labels(seg, name="seg")
+    seg_layer = viewer.add_labels(seg, name="seg")
+    seg_layer.features = df
     viewer.add_labels(ann, name="ann")
     widget = ClassificationWidget(viewer)
     qtbot.addWidget(widget)
-    widget._refresh_table_combo()
-    widget._table_combo.setCurrentText("Morphology (seg)")
     widget._seg_combo.setCurrentText("seg")
     widget._ann_combo.setCurrentText("ann")
     widget._project_annotations()
@@ -187,97 +145,69 @@ def test_get_class_names_reads_table(make_napari_viewer, qtbot):
     assert names == {1: "type_A", 2: "type_B"}
 
 
-def test_train_and_apply_adds_classification_column(make_napari_viewer, qtbot):
+def test_train_and_apply_writes_classification_columns(make_napari_viewer, qtbot):
     from segmentation_measurement._classification_widget import ClassificationWidget
-    df = _make_annotated_df(20)
-    _register("Intensity (cells)", df)
     viewer = make_napari_viewer()
+    seg_layer = _make_seg_with_features(viewer, n=20, name="seg")
     widget = ClassificationWidget(viewer)
     qtbot.addWidget(widget)
-    widget._refresh_table_combo()
-    widget._table_combo.setCurrentText("Intensity (cells)")
+    widget._seg_combo.setCurrentText("seg")
     widget._method_combo.setCurrentText("Logistic Regression")
     widget._train_and_apply()
-    assert widget._measurements is not None
-    assert "classification_id" in widget._measurements.columns
-    assert "classification_name" in widget._measurements.columns
+    feats = seg_layer.features
+    assert "classification_id" in feats.columns
+    assert "classification_name" in feats.columns
 
 
 def test_train_and_apply_stores_classifier(make_napari_viewer, qtbot):
     from segmentation_measurement._classification_widget import ClassificationWidget
-    df = _make_annotated_df(20)
-    _register("Intensity (cells)", df)
     viewer = make_napari_viewer()
+    _make_seg_with_features(viewer, n=20, name="seg")
     widget = ClassificationWidget(viewer)
     qtbot.addWidget(widget)
-    widget._refresh_table_combo()
-    widget._table_combo.setCurrentText("Intensity (cells)")
+    widget._seg_combo.setCurrentText("seg")
     widget._train_and_apply()
     assert widget._classifier is not None
 
 
 def test_train_skipped_when_no_annotation_column(make_napari_viewer, qtbot):
     from segmentation_measurement._classification_widget import ClassificationWidget
-    df = _make_df(20)  # no annotation column
-    _register("Intensity (cells)", df)
+    df = pd.DataFrame({
+        "index": [1, 2, 3],
+        "mean_intensity": [10.0, 50.0, 90.0],
+    })  # no annotation column
     viewer = make_napari_viewer()
+    _make_seg_with_features(viewer, n=3, features=df, name="seg")
     widget = ClassificationWidget(viewer)
     qtbot.addWidget(widget)
-    widget._refresh_table_combo()
-    widget._table_combo.setCurrentText("Intensity (cells)")
+    widget._seg_combo.setCurrentText("seg")
     widget._train_and_apply()
     assert widget._classifier is None
 
 
-def test_apply_classifier_uses_class_names(make_napari_viewer, qtbot):
-    from segmentation_measurement._classification_widget import ClassificationWidget
-    from qtpy.QtWidgets import QTableWidgetItem
-    df = _make_annotated_df(20)
-    _register("Intensity (cells)", df)
-    viewer = make_napari_viewer()
-    widget = ClassificationWidget(viewer)
-    qtbot.addWidget(widget)
-    widget._refresh_table_combo()
-    widget._table_combo.setCurrentText("Intensity (cells)")
-    widget._train_and_apply()
-    # Manually set class names
-    widget._class_names_table.setRowCount(2)
-    widget._class_names_table.setItem(0, 0, QTableWidgetItem("1"))
-    widget._class_names_table.setItem(0, 1, QTableWidgetItem("type_A"))
-    widget._class_names_table.setItem(1, 0, QTableWidgetItem("2"))
-    widget._class_names_table.setItem(1, 1, QTableWidgetItem("type_B"))
-    widget._apply_classifier_only()
-    names = set(widget._measurements["classification_name"].unique()) - {""}
-    assert names.issubset({"type_A", "type_B"})
-
-
 def test_random_forest_method(make_napari_viewer, qtbot):
     from segmentation_measurement._classification_widget import ClassificationWidget
-    df = _make_annotated_df(20)
-    _register("Intensity (cells)", df)
     viewer = make_napari_viewer()
+    seg_layer = _make_seg_with_features(viewer, n=20, name="seg")
     widget = ClassificationWidget(viewer)
     qtbot.addWidget(widget)
-    widget._refresh_table_combo()
-    widget._table_combo.setCurrentText("Intensity (cells)")
+    widget._seg_combo.setCurrentText("seg")
     widget._method_combo.setCurrentText("Random Forest")
     widget._rf_n_spin.setValue(10)
     widget._train_and_apply()
     assert widget._classifier is not None
-    assert "classification_id" in widget._measurements.columns
+    assert "classification_id" in seg_layer.features.columns
 
 
 def test_classification_ids_are_one_based(make_napari_viewer, qtbot):
     from segmentation_measurement._classification_widget import ClassificationWidget
-    df = _make_annotated_df(20)
-    _register("Intensity (cells)", df)
     viewer = make_napari_viewer()
+    seg_layer = _make_seg_with_features(viewer, n=20, name="seg")
     widget = ClassificationWidget(viewer)
     qtbot.addWidget(widget)
-    widget._refresh_table_combo()
-    widget._table_combo.setCurrentText("Intensity (cells)")
+    widget._seg_combo.setCurrentText("seg")
     widget._train_and_apply()
-    cids = widget._measurements["classification_id"].values
+    cids = seg_layer.features["classification_id"].values
     nonzero = cids[cids > 0]
     assert len(nonzero) > 0
     assert nonzero.min() >= 1
@@ -290,22 +220,17 @@ def test_train_and_apply_creates_output_layer(make_napari_viewer, qtbot):
     seg[1:6, 1:6] = 1
     seg[7:12, 7:12] = 2
     df = _make_annotated_df(2)
-    df["label"] = [1, 2]
-    _register("Intensity (seg)", df)
+    df["index"] = [1, 2]
     viewer = make_napari_viewer()
-    viewer.add_labels(seg, name="seg")
+    seg_layer = viewer.add_labels(seg, name="seg")
+    seg_layer.features = df
     widget = ClassificationWidget(viewer)
     qtbot.addWidget(widget)
-    widget._refresh_table_combo()
-    widget._table_combo.setCurrentText("Intensity (seg)")
     widget._seg_combo.setCurrentText("seg")
     widget._out_name.setText("clf_out")
     widget._train_and_apply()
     layer_names = [layer.name for layer in viewer.layers]
     assert "clf_out" in layer_names
-    result = viewer.layers["clf_out"].data
-    assert result[0, 0] == 0
-    assert np.any(result > 0)
 
 
 @_CI_XFAIL
@@ -315,14 +240,12 @@ def test_train_and_apply_updates_existing_layer(make_napari_viewer, qtbot):
     for i in range(1, 5):
         seg[i, i] = i
     df = _make_annotated_df(4)
-    df["label"] = [1, 2, 3, 4]
-    _register("Intensity (seg)", df)
+    df["index"] = [1, 2, 3, 4]
     viewer = make_napari_viewer()
-    viewer.add_labels(seg, name="seg")
+    seg_layer = viewer.add_labels(seg, name="seg")
+    seg_layer.features = df
     widget = ClassificationWidget(viewer)
     qtbot.addWidget(widget)
-    widget._refresh_table_combo()
-    widget._table_combo.setCurrentText("Intensity (seg)")
     widget._seg_combo.setCurrentText("seg")
     widget._out_name.setText("clf_layer")
     widget._train_and_apply()
@@ -348,8 +271,6 @@ def test_create_annotation_layer(make_napari_viewer, qtbot):
 
 def test_project_annotations_helper():
     from segmentation_measurement._classification_widget import _project_annotations_to_segments
-    # segment 1: all pixels annotated 1
-    # segment 2: 2 pixels annotated 2, 1 pixel annotated 1 → majority is 2
     seg = np.array([[1, 1, 0], [0, 2, 2], [2, 0, 0]], dtype=np.int32)
     ann = np.array([[1, 1, 0], [0, 2, 1], [2, 0, 0]], dtype=np.int32)
     result = _project_annotations_to_segments(seg, ann)

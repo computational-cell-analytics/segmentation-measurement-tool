@@ -114,6 +114,8 @@ class PostprocessingWidget(QWidget):
         self._run_btn.clicked.connect(self._run)
         layout.addWidget(self._run_btn)
 
+        layout.addStretch()
+
     def _on_method_changed(self, index: int) -> None:
         self._params_stack.setCurrentIndex(index)
 

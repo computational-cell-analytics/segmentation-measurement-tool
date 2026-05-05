@@ -15,7 +15,7 @@ from segmentation_measurement.analysis import cluster_measurements
 def _make_measurements(n: int = 20) -> pd.DataFrame:
     rng = np.random.default_rng(0)
     return pd.DataFrame({
-        "label": np.arange(1, n + 1),
+        "index": np.arange(1, n + 1),
         "mean_intensity": rng.uniform(0, 100, n),
         "area": rng.uniform(10, 200, n),
     })
@@ -58,7 +58,7 @@ class TestClusterMeasurements(unittest.TestCase):
 
     def test_excludes_label_from_features(self):
         df = pd.DataFrame({
-            "label": np.arange(1, 21),
+            "index": np.arange(1, 21),
             "mean_intensity": np.linspace(0, 100, 20),
         })
         result = cluster_measurements(df, method="kmeans", n_clusters=2)
@@ -77,14 +77,14 @@ class TestClusterMeasurements(unittest.TestCase):
             cluster_measurements(df, method="unknown_method")
 
     def test_raises_when_no_feature_columns(self):
-        df = pd.DataFrame({"label": [1, 2, 3]})
+        df = pd.DataFrame({"index": [1, 2, 3]})
         with self.assertRaises(ValueError):
             cluster_measurements(df, method="kmeans")
 
     def test_label_column_preserved(self):
         df = _make_measurements()
         result = cluster_measurements(df, method="kmeans", n_clusters=2)
-        pd.testing.assert_series_equal(result["label"], df["label"])
+        pd.testing.assert_series_equal(result["index"], df["index"])
 
     def test_cluster_ids_are_integers(self):
         df = _make_measurements()
@@ -101,7 +101,7 @@ class TestClusterMeasurements(unittest.TestCase):
     def test_dbscan_noise_is_minus_one(self):
         # Use settings that reliably produce noise points
         df = pd.DataFrame({
-            "label": np.arange(1, 11),
+            "index": np.arange(1, 11),
             "feat": [0., 0.01, 50., 50.01, 100., 0.02, 50.02, 100.01, 200., 300.],
         })
         result = cluster_measurements(df, method="dbscan", eps=0.1, min_samples=2)
@@ -187,7 +187,7 @@ class TestClusteringCLI(unittest.TestCase):
         seg[7:12, 7:12] = 2
         seg[13:18, 13:18] = 3
         df = pd.DataFrame({
-            "label": [1, 2, 3],
+            "index": [1, 2, 3],
             "mean_intensity": [10.0, 50.0, 90.0],
         })
         with tempfile.TemporaryDirectory() as tmpdir:

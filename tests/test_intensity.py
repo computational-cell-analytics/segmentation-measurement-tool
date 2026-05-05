@@ -32,13 +32,13 @@ class TestMeasureIntensities(unittest.TestCase):
         seg, intensity = self._make_data_2d()
         result = measure_intensities(seg, intensity)
         self.assertEqual(len(result), 2)
-        self.assertSetEqual(set(result["label"]), {1, 2})
+        self.assertSetEqual(set(result["index"]), {1, 2})
 
     def test_correct_mean_intensity(self):
         seg, intensity = self._make_data_2d()
         result = measure_intensities(seg, intensity)
-        row1 = result[result["label"] == 1].iloc[0]
-        row2 = result[result["label"] == 2].iloc[0]
+        row1 = result[result["index"] == 1].iloc[0]
+        row2 = result[result["index"] == 2].iloc[0]
         self.assertAlmostEqual(row1["mean_intensity"], 10.0, places=4)
         self.assertAlmostEqual(row2["mean_intensity"], 50.0, places=4)
 
@@ -46,7 +46,7 @@ class TestMeasureIntensities(unittest.TestCase):
         seg, intensity = self._make_data_2d()
         result = measure_intensities(seg, intensity)
         for col in [
-            "label", "mean_intensity", "median_intensity",
+            "index", "mean_intensity", "median_intensity",
             "max_intensity", "min_intensity", "std_intensity",
             "percentile_10", "percentile_25", "percentile_75", "percentile_90",
         ]:
@@ -56,7 +56,7 @@ class TestMeasureIntensities(unittest.TestCase):
         seg, intensity = self._make_data_2d()
         result = measure_intensities(seg, intensity)
         self.assertAlmostEqual(
-            result[result["label"] == 1].iloc[0]["std_intensity"], 0.0
+            result[result["index"] == 1].iloc[0]["std_intensity"], 0.0
         )
 
     def test_percentiles_ordered(self):
@@ -83,7 +83,7 @@ class TestMeasureIntensities(unittest.TestCase):
         intensity = np.zeros((10, 10), dtype=np.float32)
         result = measure_intensities(seg, intensity)
         self.assertEqual(len(result), 0)
-        self.assertIn("label", result.columns)
+        self.assertIn("index", result.columns)
 
 
 class TestIntensityCLI(unittest.TestCase):
@@ -116,10 +116,10 @@ class TestIntensityCLI(unittest.TestCase):
             self.assertEqual(len(df), 2)
             self.assertIn("mean_intensity", df.columns)
             self.assertAlmostEqual(
-                df[df["label"] == 1].iloc[0]["mean_intensity"], 10.0, places=2
+                df[df["index"] == 1].iloc[0]["mean_intensity"], 10.0, places=2
             )
             self.assertAlmostEqual(
-                df[df["label"] == 2].iloc[0]["mean_intensity"], 50.0, places=2
+                df[df["index"] == 2].iloc[0]["mean_intensity"], 50.0, places=2
             )
 
     def test_measure_intensities_cli_tsv(self):

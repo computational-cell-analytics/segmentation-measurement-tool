@@ -213,7 +213,7 @@ segmentation-measurement measure intensities \
 
 | Column | Description |
 |--------|-------------|
-| `label` | Integer segment label |
+| `index` | Integer segment label ID |
 | `mean_intensity` | Mean pixel intensity within the segment |
 | `median_intensity` | Median pixel intensity |
 | `max_intensity` | Maximum pixel intensity |
@@ -275,7 +275,7 @@ anisotropic spacing.  Dimension order is `(Y, X)` for 2-D and `(Z, Y, X)` for 3-
 
 | Column | Description |
 |--------|-------------|
-| `label` | Integer segment label |
+| `index` | Integer segment label ID |
 | `area` | Area in physical units |
 | `perimeter` | Perimeter length in physical units |
 | `sphericity` | Circularity (1.0 = perfect circle) |
@@ -288,7 +288,7 @@ anisotropic spacing.  Dimension order is `(Y, X)` for 2-D and `(Z, Y, X)` for 3-
 
 | Column | Description |
 |--------|-------------|
-| `label` | Integer segment label |
+| `index` | Integer segment label ID |
 | `volume` | Volume in physical units |
 | `surface_area` | Surface area via marching cubes |
 | `sphericity` | Sphericity (1.0 = perfect sphere) |
@@ -351,7 +351,7 @@ spacing, or one value per spatial dimension for anisotropic spacing in
 
 | Column | Description |
 |--------|-------------|
-| `label` | Integer cell label |
+| `index` | Integer cell label ID |
 | `n_nuclei` | Number of nucleus labels overlapping with this cell |
 | `cell_area` | Area of the cell in physical units (nucleus included) |
 | `nucleus_area` | Total area of nuclei within this cell in physical units |
@@ -414,14 +414,14 @@ The `table` command operates on saved measurement tables (CSV / TSV / XLSX).
 
 ### `merge`
 
-Merge one or more saved measurement tables on a shared key column (`label` by
+Merge one or more saved measurement tables on a shared key column (`index` by
 default) and optionally drop columns from the merged result.  The merge is an
 outer join: label IDs that appear in only some inputs are kept, with NaNs in
 the missing columns.  Non-key columns must be disjoint between input tables —
 drop conflicts beforehand or via `--drop-columns`.
 
 When only one input is given the command becomes a column-drop utility,
-useful for cleaning up an existing table.  The `label` column is the segment
+useful for cleaning up an existing table.  The `index` column is the segment
 identifier and is always preserved — passing it to `--drop-columns` raises an
 error.
 
@@ -437,7 +437,7 @@ segmentation-measurement table merge \
 |----------|------|----------|-------------|
 | `--inputs` | path… | yes | One or more input table files (CSV, TSV, XLSX) |
 | `--output` | path | yes | Output table file (extension picks the format) |
-| `--on` | str | no | Key column shared between input tables (default: `label`) |
+| `--on` | str | no | Key column shared between input tables (default: `index`) |
 | `--drop-columns` | str… | no | Columns to drop from the merged table |
 
 **Example** — merge intensity and morphology tables and drop a column:
@@ -465,7 +465,7 @@ segmentation-measurement table merge \
 ### `cluster`
 
 Cluster segments using their measurement features.  All numeric columns are used as
-features (excluding `label`, `cluster_id`, `category_id`, and `category_name`).
+features (excluding `index`, `cluster_id`, `category_id`, and `category_name`).
 Features are z-score standardised before clustering.
 
 The output table is the input table with an added `cluster_id` column.  Cluster IDs are
@@ -623,7 +623,7 @@ An *annotated* table is a measurement table that contains an integer `annotation
 are typically exported from the **Classification Analysis** napari widget, but you can
 also create the column manually.
 
-All numeric columns are used as features (excluding `label`, `annotation`,
+All numeric columns are used as features (excluding `index`, `annotation`,
 `classification_id`, `classification_name`, `cluster_id`, `category_id`, and
 `category_name`).  Features are z-score standardised inside the saved pipeline so no
 separate pre-processing step is needed when applying the classifier.

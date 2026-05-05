@@ -17,7 +17,7 @@ from segmentation_measurement.analysis import apply_classifier, train_classifier
 def _make_annotated_measurements(n: int = 20) -> pd.DataFrame:
     rng = np.random.default_rng(0)
     df = pd.DataFrame({
-        "label": np.arange(1, n + 1),
+        "index": np.arange(1, n + 1),
         "mean_intensity": np.concatenate([
             rng.uniform(0, 40, n // 2),
             rng.uniform(60, 100, n - n // 2),
@@ -61,7 +61,7 @@ class TestTrainClassifier(unittest.TestCase):
         self.assertEqual(list(df.columns), original_cols)
 
     def test_raises_missing_annotation_column(self):
-        df = pd.DataFrame({"label": [1, 2], "feat": [1.0, 2.0]})
+        df = pd.DataFrame({"index": [1, 2], "feat": [1.0, 2.0]})
         with self.assertRaises(ValueError):
             train_classifier(df, annotation_column="annotation")
 
@@ -72,7 +72,7 @@ class TestTrainClassifier(unittest.TestCase):
             train_classifier(df)
 
     def test_raises_no_feature_columns(self):
-        df = pd.DataFrame({"label": [1, 2, 3], "annotation": [1, 1, 2]})
+        df = pd.DataFrame({"index": [1, 2, 3], "annotation": [1, 1, 2]})
         with self.assertRaises(ValueError):
             train_classifier(df)
 
@@ -150,7 +150,7 @@ class TestApplyClassifier(unittest.TestCase):
     def test_label_column_preserved(self):
         df, clf = self._train()
         result = apply_classifier(df, clf)
-        pd.testing.assert_series_equal(result["label"], df["label"])
+        pd.testing.assert_series_equal(result["index"], df["index"])
 
     def test_excludes_classification_columns_from_reapply(self):
         df, clf = self._train(20)
@@ -160,7 +160,7 @@ class TestApplyClassifier(unittest.TestCase):
 
     def test_raises_no_feature_columns(self):
         _, clf = self._train()
-        df = pd.DataFrame({"label": [1, 2, 3]})
+        df = pd.DataFrame({"index": [1, 2, 3]})
         with self.assertRaises(ValueError):
             apply_classifier(df, clf)
 
@@ -233,7 +233,7 @@ class TestClassificationCLI(unittest.TestCase):
     def test_train_classifier_cli_multiple_tables(self):
         df1 = _make_annotated_measurements(10)
         df2 = _make_annotated_measurements(10)
-        df2["label"] = df2["label"] + 10
+        df2["index"] = df2["index"] + 10
         with tempfile.TemporaryDirectory() as tmpdir:
             t1 = os.path.join(tmpdir, "t1.csv")
             t2 = os.path.join(tmpdir, "t2.csv")
@@ -297,7 +297,7 @@ class TestClassificationCLI(unittest.TestCase):
         seg[1:6, 1:6] = 1
         seg[7:12, 7:12] = 2
         df = pd.DataFrame({
-            "label": [1, 2],
+            "index": [1, 2],
             "mean_intensity": [10.0, 90.0],
             "annotation": [1, 2],
         })

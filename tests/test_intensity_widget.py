@@ -42,41 +42,49 @@ def test_img_combo_populated_on_image_add(make_napari_viewer, qtbot):
 
 
 @_CI_XFAIL
-def test_run_measurement_populates_table(make_napari_viewer, qtbot):
+def test_run_measurement_writes_layer_features(make_napari_viewer, qtbot):
     from segmentation_measurement._intensity_widget import IntensityWidget
     seg = np.zeros((20, 20), dtype=np.int32)
     seg[2:8, 2:8] = 1
     intensity = np.ones((20, 20), dtype=np.float32) * 5.0
     viewer = make_napari_viewer()
-    viewer.add_labels(seg, name="seg")
+    seg_layer = viewer.add_labels(seg, name="seg")
     viewer.add_image(intensity, name="img")
     widget = IntensityWidget(viewer)
     qtbot.addWidget(widget)
     widget._seg_combo.setCurrentText("seg")
     widget._img_combo.setCurrentText("img")
     widget._run_measurement()
-    assert widget._measurements is not None
-    assert len(widget._measurements) == 1
-    assert widget._table.rowCount() == 1
+    feats = seg_layer.features
+    assert "index" in feats.columns
+    assert "mean_intensity" in feats.columns
+    # The features table is padded so row position == label value, so a NaN
+    # row exists for the background (label 0).  Drop NaN rows to inspect the
+    # actual measurement.
+    real = feats.dropna(subset=["mean_intensity"])
+    assert len(real) == 1
+    assert int(real["index"].iloc[0]) == 1
 
 
 @_CI_XFAIL
-def test_measurement_columns_in_table(make_napari_viewer, qtbot):
+def test_running_measurement_twice_overwrites(make_napari_viewer, qtbot):
+    """Re-running on the same layer silently overwrites overlapping columns."""
     from segmentation_measurement._intensity_widget import IntensityWidget
     seg = np.zeros((20, 20), dtype=np.int32)
     seg[2:8, 2:8] = 1
-    intensity = np.ones((20, 20), dtype=np.float32)
+    intensity_a = np.ones((20, 20), dtype=np.float32) * 5.0
+    intensity_b = np.ones((20, 20), dtype=np.float32) * 9.0
     viewer = make_napari_viewer()
-    viewer.add_labels(seg, name="seg")
-    viewer.add_image(intensity, name="img")
+    seg_layer = viewer.add_labels(seg, name="seg")
+    viewer.add_image(intensity_a, name="ia")
+    viewer.add_image(intensity_b, name="ib")
     widget = IntensityWidget(viewer)
     qtbot.addWidget(widget)
     widget._seg_combo.setCurrentText("seg")
-    widget._img_combo.setCurrentText("img")
+    widget._img_combo.setCurrentText("ia")
     widget._run_measurement()
-    headers = [
-        widget._table.horizontalHeaderItem(i).text()
-        for i in range(widget._table.columnCount())
-    ]
-    assert "mean_intensity" in headers
-    assert "label" in headers
+    widget._img_combo.setCurrentText("ib")
+    widget._run_measurement()
+    # Row position == label value; label 1 is at row 1 (row 0 is background).
+    feats = seg_layer.features
+    assert abs(float(feats.loc[feats["index"] == 1, "mean_intensity"].iloc[0]) - 9.0) < 1e-6

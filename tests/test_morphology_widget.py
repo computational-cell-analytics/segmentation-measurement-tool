@@ -94,39 +94,27 @@ def test_3d_layer_scale_populates_three_spinboxes(make_napari_viewer, qtbot):
     assert abs(widget._scale_spins[2].value() - 0.5) < 1e-6  # X
 
 
-def test_run_measurement_populates_table(make_napari_viewer, qtbot):
+def test_run_measurement_writes_layer_features(make_napari_viewer, qtbot):
     from segmentation_measurement._morphology_widget import MorphologyWidget
     seg = np.zeros((20, 20), dtype=np.int32)
     seg[2:8, 2:8] = 1
     seg[12:18, 12:18] = 2
     viewer = make_napari_viewer()
-    viewer.add_labels(seg, name="seg")
+    seg_layer = viewer.add_labels(seg, name="seg")
     widget = MorphologyWidget(viewer)
     qtbot.addWidget(widget)
     widget._seg_combo.setCurrentText("seg")
     widget._run_measurement()
-    assert widget._measurements is not None
-    assert len(widget._measurements) == 2
-    assert widget._table.rowCount() == 2
-
-
-def test_measurement_columns_in_table(make_napari_viewer, qtbot):
-    from segmentation_measurement._morphology_widget import MorphologyWidget
-    seg = np.zeros((20, 20), dtype=np.int32)
-    seg[2:8, 2:8] = 1
-    viewer = make_napari_viewer()
-    viewer.add_labels(seg, name="seg")
-    widget = MorphologyWidget(viewer)
-    qtbot.addWidget(widget)
-    widget._seg_combo.setCurrentText("seg")
-    widget._run_measurement()
-    headers = [
-        widget._table.horizontalHeaderItem(i).text()
-        for i in range(widget._table.columnCount())
-    ]
-    assert "area" in headers
-    assert "sphericity" in headers
-    assert "solidity" in headers
+    feats = seg_layer.features
+    assert "index" in feats.columns
+    assert "area" in feats.columns
+    assert "sphericity" in feats.columns
+    assert "solidity" in feats.columns
+    # Padded so row position == label value: row 0 is background NaN, rows 1
+    # and 2 are the measured segments.
+    real = feats.dropna(subset=["area"])
+    assert len(real) == 2
+    assert set(real["index"]) == {1, 2}
 
 
 def test_isotropic_scale_applied_to_area(make_napari_viewer, qtbot):
@@ -134,13 +122,14 @@ def test_isotropic_scale_applied_to_area(make_napari_viewer, qtbot):
     seg = np.zeros((20, 20), dtype=np.int32)
     seg[4:14, 4:14] = 1  # 10x10 = 100 pixels
     viewer = make_napari_viewer()
-    viewer.add_labels(seg, name="seg")
+    seg_layer = viewer.add_labels(seg, name="seg")
 
     widget = MorphologyWidget(viewer)
     qtbot.addWidget(widget)
     widget._seg_combo.setCurrentText("seg")
     widget._run_measurement()
-    assert abs(widget._measurements.iloc[0]["area"] - 100.0) < 0.1
+    # Row 0 is background NaN; label 1 is at row 1 after padding.
+    assert abs(seg_layer.features.iloc[1]["area"] - 100.0) < 0.1
 
     widget_scaled = MorphologyWidget(viewer)
     qtbot.addWidget(widget_scaled)
@@ -149,7 +138,7 @@ def test_isotropic_scale_applied_to_area(make_napari_viewer, qtbot):
         spin.setValue(0.5)
     widget_scaled._run_measurement()
     # 100 * 0.25 = 25
-    assert abs(widget_scaled._measurements.iloc[0]["area"] - 25.0) < 0.1
+    assert abs(seg_layer.features.iloc[1]["area"] - 25.0) < 0.1
 
 
 def test_anisotropic_scale_applied_to_area(make_napari_viewer, qtbot):
@@ -157,12 +146,12 @@ def test_anisotropic_scale_applied_to_area(make_napari_viewer, qtbot):
     seg = np.zeros((20, 20), dtype=np.int32)
     seg[4:14, 4:14] = 1  # 10x10 = 100 pixels
     viewer = make_napari_viewer()
-    viewer.add_labels(seg, name="seg")
+    seg_layer = viewer.add_labels(seg, name="seg")
     widget = MorphologyWidget(viewer)
     qtbot.addWidget(widget)
     widget._seg_combo.setCurrentText("seg")
     widget._scale_spins[0].setValue(0.5)  # Y
     widget._scale_spins[1].setValue(1.0)  # X
     widget._run_measurement()
-    # 100 * (0.5 * 1.0) = 50
-    assert abs(widget._measurements.iloc[0]["area"] - 50.0) < 0.1
+    # 100 * (0.5 * 1.0) = 50; label 1 is at row 1 (row 0 is background).
+    assert abs(seg_layer.features.iloc[1]["area"] - 50.0) < 0.1
