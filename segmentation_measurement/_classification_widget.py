@@ -24,28 +24,29 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from segmentation_measurement._utils import (
-    get_registered_tables,
-    populate_table_widget,
-    save_table,
+from segmentation_measurement._layer_features import (
+    merge_features_into_layer,
+    show_features_table,
 )
 
 
 class ClassificationWidget(QWidget):
     """Widget for interactive classification of segments by measurement features.
 
-    Users paint brushstroke annotations on a dedicated annotation layer.
-    Clicking *Project annotations* maps per-pixel annotations to per-segment
-    labels via majority vote.  A logistic regression or random forest classifier
-    is then trained on the annotated segments and applied to the full table.
-    The result is written to a new output label layer and a new column in the
-    measurement table.  Trained classifiers can be exported and reloaded.
+    Operates on the ``features`` table of the selected Labels layer.  Users
+    paint brushstroke annotations on a dedicated annotation layer.  Clicking
+    *Project annotations* maps per-pixel annotations to per-segment labels
+    via majority vote and merges them into the source layer's ``features``
+    under an ``annotation`` column.  Training uses the annotated rows to fit
+    a logistic regression or random forest classifier; *Apply* writes
+    ``classification_id`` and ``classification_name`` columns back into the
+    source layer's ``features`` and creates a new label layer for
+    visualisation.  Trained classifiers can be exported and reloaded.
     """
 
     def __init__(self, napari_viewer: napari.Viewer) -> None:
         super().__init__()
         self._viewer = napari_viewer
-        self._measurements: pd.DataFrame | None = None
         self._classifier = None
         self._setup_ui()
         self._viewer.layers.events.inserted.connect(self._update_layer_combos)
@@ -67,35 +68,9 @@ class ClassificationWidget(QWidget):
         layout = QVBoxLayout()
         inner.setLayout(layout)
 
-        layout.addWidget(self._build_table_group())
         layout.addWidget(self._build_layers_group())
         layout.addWidget(self._build_class_names_group())
         layout.addWidget(self._build_classifier_group())
-
-    def _build_table_group(self) -> QGroupBox:
-        group = QGroupBox("Measurement table")
-        layout = QVBoxLayout()
-
-        sel_row = QHBoxLayout()
-        sel_row.addWidget(QLabel("Table:"))
-        self._table_combo = QComboBox()
-        self._table_combo.currentTextChanged.connect(self._on_table_selected)
-        sel_row.addWidget(self._table_combo)
-        refresh_btn = QPushButton("Refresh")
-        refresh_btn.clicked.connect(self._refresh_table_combo)
-        sel_row.addWidget(refresh_btn)
-        layout.addLayout(sel_row)
-
-        self._table_widget = QTableWidget()
-        self._table_widget.setMinimumHeight(120)
-        layout.addWidget(self._table_widget)
-
-        save_btn = QPushButton("Save table")
-        save_btn.clicked.connect(self._save_table)
-        layout.addWidget(save_btn)
-
-        group.setLayout(layout)
-        return group
 
     def _build_layers_group(self) -> QGroupBox:
         group = QGroupBox("Layers")
@@ -116,7 +91,7 @@ class ClassificationWidget(QWidget):
         ann_row.addWidget(create_btn)
         layout.addLayout(ann_row)
 
-        project_btn = QPushButton("Project annotations to table")
+        project_btn = QPushButton("Project annotations to features")
         project_btn.clicked.connect(self._project_annotations)
         layout.addWidget(project_btn)
 
@@ -246,60 +221,59 @@ class ClassificationWidget(QWidget):
             if current in label_names:
                 combo.setCurrentText(current)
 
-    def _refresh_table_combo(self) -> None:
-        tables = get_registered_tables()
-        current = self._table_combo.currentText()
-        self._table_combo.blockSignals(True)
-        self._table_combo.clear()
-        self._table_combo.addItems(list(tables.keys()))
-        if current in tables:
-            self._table_combo.setCurrentText(current)
-        self._table_combo.blockSignals(False)
-        self._on_table_selected(self._table_combo.currentText())
+    def _seg_layer(self) -> object | None:
+        seg_name = self._seg_combo.currentText()
+        if not seg_name or seg_name not in [l.name for l in self._viewer.layers]:
+            return None
+        return self._viewer.layers[seg_name]
 
-    def _on_table_selected(self, name: str) -> None:
-        if not name:
-            return
-        tables = get_registered_tables()
-        if name not in tables:
-            return
-        self._measurements = tables[name].copy()
-        populate_table_widget(self._table_widget, self._measurements)
+    def _current_features(self) -> pd.DataFrame | None:
+        seg = self._seg_layer()
+        if seg is None:
+            return None
+        feats = getattr(seg, "features", None)
+        if feats is None or len(feats.columns) == 0:
+            return None
+        return feats
 
     # ---------------------------------------------------------- Annotation ---
 
     def _create_annotation_layer(self) -> None:
-        seg_name = self._seg_combo.currentText()
-        if not seg_name:
+        seg = self._seg_layer()
+        if seg is None:
             return
-        seg_data = self._viewer.layers[seg_name].data
-        ann_data = np.zeros_like(seg_data, dtype=np.int32)
+        ann_data = np.zeros_like(seg.data, dtype=np.int32)
         layer = self._viewer.add_labels(ann_data, name="annotations")
         self._ann_combo.setCurrentText(layer.name)
 
     def _project_annotations(self) -> None:
-        if self._measurements is None:
+        seg = self._seg_layer()
+        if seg is None:
             return
-        seg_name = self._seg_combo.currentText()
+        feats = self._current_features()
+        if feats is None:
+            return
         ann_name = self._ann_combo.currentText()
-        if not seg_name or not ann_name or seg_name == ann_name:
+        if not ann_name or ann_name == seg.name:
             return
-        seg_data = self._viewer.layers[seg_name].data
         ann_data = self._viewer.layers[ann_name].data
-        if seg_data.shape != ann_data.shape:
+        if seg.data.shape != ann_data.shape:
             return
 
-        projection = _project_annotations_to_segments(seg_data, ann_data)
+        projection = _project_annotations_to_segments(seg.data, ann_data)
         annotations = [
             projection.get(int(lbl), 0)
-            for lbl in self._measurements["label"].values
+            for lbl in feats["index"].values
         ]
-        self._measurements = self._measurements.copy()
-        self._measurements["annotation"] = annotations
-        populate_table_widget(self._table_widget, self._measurements)
+        ann_df = pd.DataFrame({
+            "index": feats["index"].values,
+            "annotation": annotations,
+        })
+        merge_features_into_layer(seg, ann_df)
 
         detected_ids = sorted(set(a for a in annotations if a > 0))
         self._update_class_names_table(detected_ids)
+        show_features_table(self._viewer, seg)
 
     def _update_class_names_table(self, annotation_ids: list[int]) -> None:
         existing = self._get_class_names()
@@ -340,56 +314,58 @@ class ClassificationWidget(QWidget):
 
     def _train_and_apply(self) -> None:
         from segmentation_measurement.analysis import train_classifier
-        if self._measurements is None or "annotation" not in self._measurements.columns:
+        feats = self._current_features()
+        if feats is None or "annotation" not in feats.columns:
             return
         method, kwargs = self._get_method_and_kwargs()
         try:
-            self._classifier = train_classifier(
-                self._measurements, method=method, **kwargs
-            )
+            self._classifier = train_classifier(feats, method=method, **kwargs)
         except ValueError:
             return
         self._apply_classifier_only()
 
     def _apply_classifier_only(self) -> None:
         from segmentation_measurement.analysis import apply_classifier
-        if self._measurements is None or self._classifier is None:
+        seg = self._seg_layer()
+        feats = self._current_features()
+        if seg is None or feats is None or self._classifier is None:
             return
         class_names_dict = self._get_class_names()
         classes = sorted(int(c) for c in self._classifier.classes_)
         class_names_list = [class_names_dict.get(c, f"class_{c}") for c in classes]
         result = apply_classifier(
-            self._measurements, self._classifier, class_names=class_names_list
+            feats, self._classifier, class_names=class_names_list
         )
-        self._measurements = result
-        populate_table_widget(self._table_widget, self._measurements)
-        self._create_output_layer()
+        merge_features_into_layer(
+            seg,
+            result[["index", "classification_id", "classification_name"]],
+        )
+        self._create_output_layer(result)
+        show_features_table(self._viewer, seg)
 
-    def _create_output_layer(self) -> None:
-        if self._measurements is None or "classification_id" not in self._measurements.columns:
+    def _create_output_layer(self, result: pd.DataFrame) -> None:
+        seg = self._seg_layer()
+        if seg is None:
             return
-        seg_name = self._seg_combo.currentText()
-        if not seg_name:
-            return
-        seg_data = self._viewer.layers[seg_name].data
-        result = np.zeros_like(seg_data, dtype=np.int32)
+        seg_data = seg.data
+        out = np.zeros_like(seg_data, dtype=np.int32)
         for lbl, cid in zip(
-            self._measurements["label"].values,
-            self._measurements["classification_id"].values,
+            result["index"].values,
+            result["classification_id"].values,
         ):
             if int(cid) > 0:
-                result[seg_data == int(lbl)] = int(cid)
+                out[seg_data == int(lbl)] = int(cid)
 
         out_name = self._out_name.text() or "classification"
         existing = [layer.name for layer in self._viewer.layers]
         if out_name in existing:
             layer = self._viewer.layers[out_name]
-            layer.data = result
+            layer.data = out
         else:
-            layer = self._viewer.add_labels(result, name=out_name)
+            layer = self._viewer.add_labels(out, name=out_name)
 
         unique_cids = sorted(
-            int(c) for c in self._measurements["classification_id"].unique() if int(c) > 0
+            int(c) for c in result["classification_id"].unique() if int(c) > 0
         )
         _apply_class_colors(layer, unique_cids)
 
@@ -412,16 +388,6 @@ class ClassificationWidget(QWidget):
         if path:
             import joblib
             self._classifier = joblib.load(path)
-
-    def _save_table(self) -> None:
-        if self._measurements is None:
-            return
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Save table", "",
-            "CSV (*.csv);;TSV (*.tsv);;Excel (*.xlsx);;All Files (*)",
-        )
-        if path:
-            save_table(self._measurements, path)
 
 
 # ------------------------------------------------------------------ helpers ---

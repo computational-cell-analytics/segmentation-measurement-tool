@@ -102,7 +102,7 @@ def cmd_analyze_cluster(args: argparse.Namespace) -> None:
     if args.segmentation and args.output_segmentation:
         seg = _load_segmentation(args.segmentation)
         out = np.zeros_like(seg)
-        for label_id, cluster_id in zip(result["label"].values, result["cluster_id"].values):
+        for label_id, cluster_id in zip(result["index"].values, result["cluster_id"].values):
             if int(cluster_id) > 0:  # 1-based; skip noise (-1)
                 out[seg == int(label_id)] = int(cluster_id)
         _save_segmentation(out, args.output_segmentation)
@@ -121,7 +121,7 @@ def cmd_analyze_classify(args: argparse.Namespace) -> None:
     if args.segmentation and args.output_segmentation:
         seg = _load_segmentation(args.segmentation)
         out = np.zeros_like(seg)
-        for label_id, cid in zip(result["label"].values, result["classification_id"].values):
+        for label_id, cid in zip(result["index"].values, result["classification_id"].values):
             if int(cid) > 0:
                 out[seg == int(label_id)] = int(cid)
         _save_segmentation(out, args.output_segmentation)
@@ -187,7 +187,7 @@ def cmd_analyze_threshold(args: argparse.Namespace) -> None:
     if args.segmentation and args.output_segmentation:
         seg = _load_segmentation(args.segmentation)
         out = np.zeros_like(seg)
-        for label_id, cat_id in zip(result["label"].values, result["category_id"].values):
+        for label_id, cat_id in zip(result["index"].values, result["category_id"].values):
             out[seg == int(label_id)] = int(cat_id)
         _save_segmentation(out, args.output_segmentation)
 
@@ -336,8 +336,8 @@ def main() -> None:
         help="Output table file (CSV by default; TSV or XLSX by extension).",
     )
     merge_parser.add_argument(
-        "--on", default="label",
-        help="Key column shared between input tables (default: label).",
+        "--on", default="index",
+        help="Key column shared between input tables (default: index).",
     )
     merge_parser.add_argument(
         "--drop-columns", nargs="+", default=None,

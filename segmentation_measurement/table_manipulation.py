@@ -9,7 +9,7 @@ import pandas as pd
 
 
 def merge_tables(
-    tables: Sequence[pd.DataFrame], on: str = "label"
+    tables: Sequence[pd.DataFrame], on: str = "index"
 ) -> pd.DataFrame:
     """Merge multiple measurement tables on a shared key column.
 
@@ -24,7 +24,7 @@ def merge_tables(
         tables (Sequence[pd.DataFrame]): Two or more measurement tables to
             merge.
         on (str): Name of the key column shared between tables. Defaults to
-            ``"label"``.
+            ``"index"``.
 
     Returns:
         pd.DataFrame: A single table containing the union of all rows and
@@ -58,7 +58,7 @@ def merge_tables(
     return merged.sort_values(on).reset_index(drop=True)
 
 
-PROTECTED_COLUMNS = ("label",)
+PROTECTED_COLUMNS = ("index",)
 
 
 def drop_columns(
@@ -66,7 +66,7 @@ def drop_columns(
 ) -> pd.DataFrame:
     """Return a copy of ``table`` with the specified columns removed.
 
-    The ``label`` column is the standard segment-identifier key throughout
+    The ``index`` column is the standard segment-identifier key throughout
     this package and may never be dropped.
 
     Args:
@@ -79,7 +79,7 @@ def drop_columns(
 
     Raises:
         ValueError: If any requested column is not present in ``table``, or
-            if a protected column (``label``) is requested.
+            if a protected column (``index``) is requested.
     """
     if isinstance(columns, str):
         columns_list = [columns]

@@ -14,7 +14,7 @@ _INTENSITY_STATS = [
 def _base_columns(ndim: int, has_intensity: bool) -> list[str]:
     size_col = "area" if ndim == 2 else "volume"
     cols = [
-        "label", "n_nuclei",
+        "index", "n_nuclei",
         f"cell_{size_col}", f"nucleus_{size_col}", f"{size_col}_ratio",
     ]
     if has_intensity:
@@ -79,9 +79,9 @@ def measure_cell_nucleus(
             and nuclear regions and their ratios are reported.
 
     Returns:
-        pd.DataFrame: One row per cell with columns ``label``, ``n_nuclei``,
-            ``cell_area``/``cell_volume``, ``nucleus_area``/``nucleus_volume``,
-            ``area_ratio``/``volume_ratio``.  When *intensity_image* is given,
+        pd.DataFrame: One row per cell.  ``index`` holds the integer cell label
+            ID.  Columns: ``index``, ``n_nuclei``, ``cell_area``/``cell_volume``,
+            ``nucleus_area``/``nucleus_volume``, ``area_ratio``/``volume_ratio``.  When *intensity_image* is given,
             additional columns are added for ``cell_{stat}_intensity``,
             ``nucleus_{stat}_intensity``, and ``{stat}_intensity_ratio`` for
             each stat in mean, median, max, min, percentile_10, percentile_25,
@@ -149,7 +149,7 @@ def measure_cell_nucleus(
         size_ratio = cell_size / nucleus_size if nucleus_size > 0 else float("nan")
 
         row: dict = {
-            "label": int(cell_id),
+            "index": int(cell_id),
             "n_nuclei": n_nuclei,
             f"cell_{size_col}": cell_size,
             f"nucleus_{size_col}": nucleus_size,

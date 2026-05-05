@@ -2,23 +2,22 @@
 
 from __future__ import annotations
 
-import pandas as pd
 import napari
 from qtpy.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
-    QFileDialog,
     QGroupBox,
     QHBoxLayout,
     QLabel,
     QPushButton,
-    QScrollArea,
-    QTableWidget,
     QVBoxLayout,
     QWidget,
 )
 
-from segmentation_measurement._utils import populate_table_widget, register_table, save_table
+from segmentation_measurement._layer_features import (
+    merge_features_into_layer,
+    show_features_table,
+)
 
 _AXIS_LABELS_2D = ("Y", "X")
 _AXIS_LABELS_3D = ("Z", "Y", "X")
@@ -26,6 +25,9 @@ _AXIS_LABELS_3D = ("Z", "Y", "X")
 
 class MorphologyWidget(QWidget):
     """Widget for measuring per-segment morphological properties.
+
+    The result is merged into the source layer's ``features`` and shown in
+    napari's built-in *Features Table* dock, which is opened automatically.
 
     Scale spinboxes are populated with the selected label layer's physical
     pixel/voxel size (from its ``scale`` attribute) or 1.0 if not set.
@@ -35,7 +37,6 @@ class MorphologyWidget(QWidget):
     def __init__(self, napari_viewer: napari.Viewer) -> None:
         super().__init__()
         self._viewer = napari_viewer
-        self._measurements: pd.DataFrame | None = None
         self._scale_spins: list[QDoubleSpinBox] = []
         self._scale_layout: QVBoxLayout | None = None
         self._setup_ui()
@@ -44,17 +45,8 @@ class MorphologyWidget(QWidget):
         self._update_layer_combos()
 
     def _setup_ui(self) -> None:
-        outer_layout = QVBoxLayout()
-        self.setLayout(outer_layout)
-
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        outer_layout.addWidget(scroll)
-
-        inner = QWidget()
-        scroll.setWidget(inner)
         layout = QVBoxLayout()
-        inner.setLayout(layout)
+        self.setLayout(layout)
 
         seg_layout = QHBoxLayout()
         seg_layout.addWidget(QLabel("Segmentation:"))
@@ -67,22 +59,13 @@ class MorphologyWidget(QWidget):
         self._scale_layout = QVBoxLayout()
         scale_group.setLayout(self._scale_layout)
         layout.addWidget(scale_group)
-        self._rebuild_scale_spins(2, [1.0, 1.0])  # default before a layer is selected
+        self._rebuild_scale_spins(2, [1.0, 1.0])
 
         self._measure_btn = QPushButton("Measure morphology")
         self._measure_btn.clicked.connect(self._run_measurement)
         layout.addWidget(self._measure_btn)
 
-        table_group = QGroupBox("Measurements")
-        table_layout = QVBoxLayout()
-        self._table = QTableWidget()
-        self._table.setMinimumHeight(150)
-        table_layout.addWidget(self._table)
-        save_btn = QPushButton("Save table")
-        save_btn.clicked.connect(self._save_table)
-        table_layout.addWidget(save_btn)
-        table_group.setLayout(table_layout)
-        layout.addWidget(table_group)
+        layout.addStretch()
 
     def _rebuild_scale_spins(self, ndim: int, scale_values: list) -> None:
         """Recreate per-axis spinboxes for the given dimensionality."""
@@ -119,14 +102,11 @@ class MorphologyWidget(QWidget):
             self._seg_combo.setCurrentText(current)
 
     def _on_seg_changed(self, name: str) -> None:
-        """Rebuild scale spinboxes to match the selected layer's dimensionality and scale."""
         if not name or name not in [layer.name for layer in self._viewer.layers]:
             return
         layer = self._viewer.layers[name]
         ndim = layer.data.ndim
-        # layer.scale has one entry per spatial dimension; use last ndim entries
         raw_scale = [float(s) for s in layer.scale[-ndim:]]
-        # Replace zeros (unset) with 1.0
         scale_values = [s if s != 0.0 else 1.0 for s in raw_scale]
         self._rebuild_scale_spins(ndim, scale_values)
 
@@ -135,20 +115,8 @@ class MorphologyWidget(QWidget):
         seg_name = self._seg_combo.currentText()
         if not seg_name or not self._scale_spins:
             return
-        segmentation = self._viewer.layers[seg_name].data
+        seg_layer = self._viewer.layers[seg_name]
         scale = tuple(spin.value() for spin in self._scale_spins)
-        self._measurements = measure_morphology(segmentation, scale=scale)
-        populate_table_widget(self._table, self._measurements)
-        register_table(f"Morphology ({seg_name})", self._measurements)
-
-    def _save_table(self) -> None:
-        if self._measurements is None:
-            return
-        path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Save measurements",
-            "",
-            "CSV (*.csv);;TSV (*.tsv);;Excel (*.xlsx);;All Files (*)",
-        )
-        if path:
-            save_table(self._measurements, path)
+        df = measure_morphology(seg_layer.data, scale=scale)
+        merge_features_into_layer(seg_layer, df)
+        show_features_table(self._viewer, seg_layer)

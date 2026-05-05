@@ -50,12 +50,12 @@ class TestMeasureCellNucleus2D(unittest.TestCase):
         cell_seg, nuc_seg = _make_2d_data()
         result = measure_cell_nucleus(cell_seg, nuc_seg)
         self.assertEqual(len(result), 2)
-        self.assertSetEqual(set(result["label"]), {1, 2})
+        self.assertSetEqual(set(result["index"]), {1, 2})
 
     def test_required_columns_2d_no_intensity(self):
         cell_seg, nuc_seg = _make_2d_data()
         result = measure_cell_nucleus(cell_seg, nuc_seg)
-        for col in ["label", "n_nuclei", "cell_area", "nucleus_area", "area_ratio"]:
+        for col in ["index", "n_nuclei", "cell_area", "nucleus_area", "area_ratio"]:
             self.assertIn(col, result.columns)
         self.assertNotIn("cell_mean_intensity", result.columns)
 
@@ -63,7 +63,7 @@ class TestMeasureCellNucleus2D(unittest.TestCase):
         cell_seg, nuc_seg, intensity = _make_2d_data(with_intensity=True)
         result = measure_cell_nucleus(cell_seg, nuc_seg, intensity_image=intensity)
         for col in [
-            "label", "n_nuclei", "cell_area", "nucleus_area", "area_ratio",
+            "index", "n_nuclei", "cell_area", "nucleus_area", "area_ratio",
             "cell_mean_intensity", "nucleus_mean_intensity", "mean_intensity_ratio",
             "cell_percentile_10_intensity", "nucleus_percentile_90_intensity",
         ]:
@@ -72,73 +72,73 @@ class TestMeasureCellNucleus2D(unittest.TestCase):
     def test_n_nuclei_correct(self):
         cell_seg, nuc_seg = _make_2d_data()
         result = measure_cell_nucleus(cell_seg, nuc_seg)
-        row1 = result[result["label"] == 1].iloc[0]
-        row2 = result[result["label"] == 2].iloc[0]
+        row1 = result[result["index"] == 1].iloc[0]
+        row2 = result[result["index"] == 2].iloc[0]
         self.assertEqual(row1["n_nuclei"], 1)
         self.assertEqual(row2["n_nuclei"], 0)
 
     def test_cell_area_correct(self):
         cell_seg, nuc_seg = _make_2d_data()
         result = measure_cell_nucleus(cell_seg, nuc_seg)
-        row1 = result[result["label"] == 1].iloc[0]
+        row1 = result[result["index"] == 1].iloc[0]
         self.assertAlmostEqual(row1["cell_area"], 144.0, places=1)
 
     def test_nucleus_area_correct(self):
         cell_seg, nuc_seg = _make_2d_data()
         result = measure_cell_nucleus(cell_seg, nuc_seg)
-        row1 = result[result["label"] == 1].iloc[0]
+        row1 = result[result["index"] == 1].iloc[0]
         self.assertAlmostEqual(row1["nucleus_area"], 25.0, places=1)
 
     def test_area_ratio_correct(self):
         cell_seg, nuc_seg = _make_2d_data()
         result = measure_cell_nucleus(cell_seg, nuc_seg)
-        row1 = result[result["label"] == 1].iloc[0]
+        row1 = result[result["index"] == 1].iloc[0]
         self.assertAlmostEqual(row1["area_ratio"], 144.0 / 25.0, places=4)
 
     def test_area_ratio_nan_when_no_nucleus(self):
         cell_seg, nuc_seg = _make_2d_data()
         result = measure_cell_nucleus(cell_seg, nuc_seg)
-        row2 = result[result["label"] == 2].iloc[0]
+        row2 = result[result["index"] == 2].iloc[0]
         self.assertTrue(math.isnan(row2["area_ratio"]))
 
     def test_isotropic_scale_applied(self):
         cell_seg, nuc_seg = _make_2d_data()
         result = measure_cell_nucleus(cell_seg, nuc_seg, scale=0.5)
-        row1 = result[result["label"] == 1].iloc[0]
+        row1 = result[result["index"] == 1].iloc[0]
         self.assertAlmostEqual(row1["cell_area"], 144.0 * 0.25, places=4)
         self.assertAlmostEqual(row1["nucleus_area"], 25.0 * 0.25, places=4)
 
     def test_anisotropic_scale_applied(self):
         cell_seg, nuc_seg = _make_2d_data()
         result = measure_cell_nucleus(cell_seg, nuc_seg, scale=(2.0, 1.0))
-        row1 = result[result["label"] == 1].iloc[0]
+        row1 = result[result["index"] == 1].iloc[0]
         self.assertAlmostEqual(row1["cell_area"], 144.0 * 2.0, places=4)
 
     def test_intensity_cell_excludes_nucleus(self):
         cell_seg, nuc_seg, intensity = _make_2d_data(with_intensity=True)
         result = measure_cell_nucleus(cell_seg, nuc_seg, intensity_image=intensity)
-        row1 = result[result["label"] == 1].iloc[0]
+        row1 = result[result["index"] == 1].iloc[0]
         # Cytoplasm pixels = 144 - 25 = 119 px, all have value 10.0
         self.assertAlmostEqual(row1["cell_mean_intensity"], 10.0, places=4)
 
     def test_intensity_nucleus_value(self):
         cell_seg, nuc_seg, intensity = _make_2d_data(with_intensity=True)
         result = measure_cell_nucleus(cell_seg, nuc_seg, intensity_image=intensity)
-        row1 = result[result["label"] == 1].iloc[0]
+        row1 = result[result["index"] == 1].iloc[0]
         # Nucleus pixels all have value 20.0
         self.assertAlmostEqual(row1["nucleus_mean_intensity"], 20.0, places=4)
 
     def test_intensity_ratio_correct(self):
         cell_seg, nuc_seg, intensity = _make_2d_data(with_intensity=True)
         result = measure_cell_nucleus(cell_seg, nuc_seg, intensity_image=intensity)
-        row1 = result[result["label"] == 1].iloc[0]
+        row1 = result[result["index"] == 1].iloc[0]
         # 10.0 / 20.0 = 0.5
         self.assertAlmostEqual(row1["mean_intensity_ratio"], 0.5, places=4)
 
     def test_intensity_nan_when_no_nucleus(self):
         cell_seg, nuc_seg, intensity = _make_2d_data(with_intensity=True)
         result = measure_cell_nucleus(cell_seg, nuc_seg, intensity_image=intensity)
-        row2 = result[result["label"] == 2].iloc[0]
+        row2 = result[result["index"] == 2].iloc[0]
         self.assertTrue(math.isnan(row2["nucleus_mean_intensity"]))
         self.assertTrue(math.isnan(row2["mean_intensity_ratio"]))
 
@@ -147,7 +147,7 @@ class TestMeasureCellNucleus2D(unittest.TestCase):
         nuc_seg = np.zeros((10, 10), dtype=np.int32)
         result = measure_cell_nucleus(cell_seg, nuc_seg)
         self.assertEqual(len(result), 0)
-        self.assertIn("label", result.columns)
+        self.assertIn("index", result.columns)
         self.assertIn("n_nuclei", result.columns)
 
 
@@ -161,7 +161,7 @@ class TestMeasureCellNucleus3D(unittest.TestCase):
     def test_required_columns_3d(self):
         cell_seg, nuc_seg = _make_3d_data()
         result = measure_cell_nucleus(cell_seg, nuc_seg)
-        for col in ["label", "n_nuclei", "cell_volume", "nucleus_volume", "volume_ratio"]:
+        for col in ["index", "n_nuclei", "cell_volume", "nucleus_volume", "volume_ratio"]:
             self.assertIn(col, result.columns)
         self.assertNotIn("cell_area", result.columns)
 
@@ -297,7 +297,7 @@ class TestCellNucleusCLI(unittest.TestCase):
                 "--scale", "0.5",
             ])
             df = pd.read_csv(out_path)
-            row1 = df[df["label"] == 1].iloc[0]
+            row1 = df[df["index"] == 1].iloc[0]
             self.assertAlmostEqual(row1["cell_area"], 144.0 * 0.25, places=2)
 
     def test_cli_tsv_output(self):

@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 
 _CLUSTER_EXCLUDE = frozenset({
-    "label", "cluster_id", "category_id", "category_name",
+    "index", "cluster_id", "category_id", "category_name",
     "annotation", "classification_id", "classification_name",
 })
 
@@ -83,9 +83,22 @@ def categorize_by_threshold(
         )
     result = measurements.copy()
     values = result[column].values
-    category_ids = (np.digitize(values, sorted(thresholds)) + 1).astype(int)
+    # NaN values (e.g. the background-padding row added so napari's Features
+    # Table can map row position → label) are not categorized.  They get
+    # ``category_id=0`` and an empty ``category_name``.
+    if np.issubdtype(np.asarray(values).dtype, np.number):
+        valid_mask = ~np.isnan(np.asarray(values, dtype=float))
+    else:
+        valid_mask = np.ones(len(values), dtype=bool)
+    category_ids = np.zeros(len(values), dtype=int)
+    if valid_mask.any():
+        category_ids[valid_mask] = np.digitize(
+            np.asarray(values, dtype=float)[valid_mask], sorted(thresholds)
+        ) + 1
     result["category_id"] = category_ids
-    result["category_name"] = [category_names[cid - 1] for cid in category_ids]
+    result["category_name"] = [
+        category_names[cid - 1] if cid > 0 else "" for cid in category_ids
+    ]
     return result
 
 
@@ -97,7 +110,7 @@ def cluster_measurements(
     """Apply clustering to measurement features.
 
     Clusters segments using all numeric measurement columns, excluding
-    ``label``, ``cluster_id``, ``category_id``, and ``category_name``.
+    ``index``, ``cluster_id``, ``category_id``, and ``category_name``.
     Features are z-score standardised before clustering.
 
     Args:

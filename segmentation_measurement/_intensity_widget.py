@@ -2,48 +2,40 @@
 
 from __future__ import annotations
 
-import pandas as pd
 import napari
 from qtpy.QtWidgets import (
     QComboBox,
-    QFileDialog,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
     QPushButton,
-    QScrollArea,
-    QTableWidget,
     QVBoxLayout,
     QWidget,
 )
 
-from segmentation_measurement._utils import populate_table_widget, register_table, save_table
+from segmentation_measurement._layer_features import (
+    merge_features_into_layer,
+    show_features_table,
+)
 
 
 class IntensityWidget(QWidget):
-    """Widget for measuring per-segment intensities."""
+    """Widget for measuring per-segment intensities.
+
+    The result is merged into the source layer's ``features`` and shown in
+    napari's built-in *Features Table* dock, which is opened automatically.
+    """
 
     def __init__(self, napari_viewer: napari.Viewer) -> None:
         super().__init__()
         self._viewer = napari_viewer
-        self._measurements: pd.DataFrame | None = None
         self._setup_ui()
         self._viewer.layers.events.inserted.connect(self._update_layer_combos)
         self._viewer.layers.events.removed.connect(self._update_layer_combos)
         self._update_layer_combos()
 
     def _setup_ui(self) -> None:
-        outer_layout = QVBoxLayout()
-        self.setLayout(outer_layout)
-
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        outer_layout.addWidget(scroll)
-
-        inner = QWidget()
-        scroll.setWidget(inner)
         layout = QVBoxLayout()
-        inner.setLayout(layout)
+        self.setLayout(layout)
 
         seg_layout = QHBoxLayout()
         seg_layout.addWidget(QLabel("Segmentation:"))
@@ -61,16 +53,7 @@ class IntensityWidget(QWidget):
         self._measure_btn.clicked.connect(self._run_measurement)
         layout.addWidget(self._measure_btn)
 
-        table_group = QGroupBox("Measurements")
-        table_layout = QVBoxLayout()
-        self._table = QTableWidget()
-        self._table.setMinimumHeight(150)
-        table_layout.addWidget(self._table)
-        save_btn = QPushButton("Save table")
-        save_btn.clicked.connect(self._save_table)
-        table_layout.addWidget(save_btn)
-        table_group.setLayout(table_layout)
-        layout.addWidget(table_group)
+        layout.addStretch()
 
     def _update_layer_combos(self, event: object = None) -> None:
         from napari.layers import Image, Labels
@@ -99,20 +82,8 @@ class IntensityWidget(QWidget):
         img_name = self._img_combo.currentText()
         if not seg_name or not img_name:
             return
-        segmentation = self._viewer.layers[seg_name].data
+        seg_layer = self._viewer.layers[seg_name]
         intensity_image = self._viewer.layers[img_name].data
-        self._measurements = measure_intensities(segmentation, intensity_image)
-        populate_table_widget(self._table, self._measurements)
-        register_table(f"Intensity ({seg_name})", self._measurements)
-
-    def _save_table(self) -> None:
-        if self._measurements is None:
-            return
-        path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Save measurements",
-            "",
-            "CSV (*.csv);;TSV (*.tsv);;Excel (*.xlsx);;All Files (*)",
-        )
-        if path:
-            save_table(self._measurements, path)
+        df = measure_intensities(seg_layer.data, intensity_image)
+        merge_features_into_layer(seg_layer, df)
+        show_features_table(self._viewer, seg_layer)

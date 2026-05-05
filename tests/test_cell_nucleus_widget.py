@@ -91,26 +91,29 @@ def test_run_measurement_no_intensity(make_napari_viewer, qtbot):
     from segmentation_measurement._cell_nucleus_widget import CellNucleusWidget
     cell_seg, nuc_seg = _make_cell_nuc_seg_2d()
     viewer = make_napari_viewer()
-    viewer.add_labels(cell_seg, name="cells")
+    cells_layer = viewer.add_labels(cell_seg, name="cells")
     viewer.add_labels(nuc_seg, name="nuclei")
     widget = CellNucleusWidget(viewer)
     qtbot.addWidget(widget)
     widget._cell_combo.setCurrentText("cells")
     widget._nuc_combo.setCurrentText("nuclei")
     widget._run_measurement()
-    assert widget._measurements is not None
-    assert len(widget._measurements) == 2
-    assert widget._table.rowCount() == 2
-    assert "n_nuclei" in widget._measurements.columns
-    assert "cell_area" in widget._measurements.columns
+    feats = cells_layer.features
+    assert "index" in feats.columns
+    assert "n_nuclei" in feats.columns
+    assert "cell_area" in feats.columns
+    # Padded so row position == label value; drop the background NaN row.
+    real = feats.dropna(subset=["cell_area"])
+    assert len(real) == 2
 
 
+@_CI_XFAIL
 def test_run_measurement_with_intensity(make_napari_viewer, qtbot):
     from segmentation_measurement._cell_nucleus_widget import CellNucleusWidget
     cell_seg, nuc_seg = _make_cell_nuc_seg_2d()
     intensity = np.ones((30, 30), dtype=np.float32) * 5.0
     viewer = make_napari_viewer()
-    viewer.add_labels(cell_seg, name="cells")
+    cells_layer = viewer.add_labels(cell_seg, name="cells")
     viewer.add_labels(nuc_seg, name="nuclei")
     viewer.add_image(intensity, name="img")
     widget = CellNucleusWidget(viewer)
@@ -119,26 +122,6 @@ def test_run_measurement_with_intensity(make_napari_viewer, qtbot):
     widget._nuc_combo.setCurrentText("nuclei")
     widget._img_combo.setCurrentText("img")
     widget._run_measurement()
-    assert widget._measurements is not None
-    assert "cell_mean_intensity" in widget._measurements.columns
-    assert "mean_intensity_ratio" in widget._measurements.columns
-
-
-def test_table_columns_populated(make_napari_viewer, qtbot):
-    from segmentation_measurement._cell_nucleus_widget import CellNucleusWidget
-    cell_seg, nuc_seg = _make_cell_nuc_seg_2d()
-    viewer = make_napari_viewer()
-    viewer.add_labels(cell_seg, name="cells")
-    viewer.add_labels(nuc_seg, name="nuclei")
-    widget = CellNucleusWidget(viewer)
-    qtbot.addWidget(widget)
-    widget._cell_combo.setCurrentText("cells")
-    widget._nuc_combo.setCurrentText("nuclei")
-    widget._run_measurement()
-    headers = [
-        widget._table.horizontalHeaderItem(i).text()
-        for i in range(widget._table.columnCount())
-    ]
-    assert "n_nuclei" in headers
-    assert "cell_area" in headers
-    assert "area_ratio" in headers
+    feats = cells_layer.features
+    assert "cell_mean_intensity" in feats.columns
+    assert "mean_intensity_ratio" in feats.columns

@@ -8,7 +8,6 @@ import napari
 from qtpy.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
-    QFileDialog,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -16,31 +15,33 @@ from qtpy.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSpinBox,
-    QTableWidget,
     QVBoxLayout,
     QWidget,
 )
 
-from segmentation_measurement._utils import (
-    get_registered_tables,
-    populate_table_widget,
-    save_table,
+from segmentation_measurement._layer_features import (
+    merge_features_into_layer,
+    show_features_table,
 )
 
 
 class ThresholdWidget(QWidget):
     """Widget for categorizing segments based on measurement thresholds.
 
-    Operates on tables registered by :class:`IntensityWidget` or
-    :class:`MorphologyWidget`.  Use the Refresh button to pick up newly
-    produced tables, then select a column, adjust thresholds, and apply
-    categorization to create a new label layer.
+    Operates on the ``features`` table of the selected Labels layer (as
+    populated by the measurement widgets or loaded into the layer via the
+    Table Manipulation widget).  Picking the layer triggers a refresh of the
+    available numeric columns and the histogram.
+
+    On *Categorize*, the chosen thresholds are applied to the selected column
+    and the resulting ``category_id`` / ``category_name`` columns are merged
+    back into the source layer's ``features``.  A new label layer is created
+    that colours each segment by its category for visualization.
     """
 
     def __init__(self, napari_viewer: napari.Viewer) -> None:
         super().__init__()
         self._viewer = napari_viewer
-        self._measurements: pd.DataFrame | None = None
         self._threshold_spins: list[QDoubleSpinBox] = []
         self._name_edits: list[QLineEdit] = []
         self._hist_fig = None
@@ -64,39 +65,13 @@ class ThresholdWidget(QWidget):
         layout = QVBoxLayout()
         inner.setLayout(layout)
 
-        # Table selection from registry
-        table_group = QGroupBox("Measurement table")
-        table_layout = QVBoxLayout()
-
-        sel_layout = QHBoxLayout()
-        sel_layout.addWidget(QLabel("Table:"))
-        self._table_combo = QComboBox()
-        self._table_combo.currentTextChanged.connect(self._on_table_selected)
-        sel_layout.addWidget(self._table_combo)
-        refresh_btn = QPushButton("Refresh")
-        refresh_btn.clicked.connect(self._refresh_table_combo)
-        sel_layout.addWidget(refresh_btn)
-        table_layout.addLayout(sel_layout)
-
-        self._table = QTableWidget()
-        self._table.setMinimumHeight(120)
-        table_layout.addWidget(self._table)
-
-        save_btn = QPushButton("Save table")
-        save_btn.clicked.connect(self._save_table)
-        table_layout.addWidget(save_btn)
-
-        table_group.setLayout(table_layout)
-        layout.addWidget(table_group)
-
-        # Segmentation layer (for creating output)
         seg_layout = QHBoxLayout()
         seg_layout.addWidget(QLabel("Segmentation:"))
         self._seg_combo = QComboBox()
+        self._seg_combo.currentTextChanged.connect(self._on_seg_selected)
         seg_layout.addWidget(self._seg_combo)
         layout.addLayout(seg_layout)
 
-        # Column and histogram
         hist_group = QGroupBox("Column histogram")
         hist_layout = QVBoxLayout()
         col_layout = QHBoxLayout()
@@ -109,7 +84,6 @@ class ThresholdWidget(QWidget):
         hist_group.setLayout(hist_layout)
         layout.addWidget(hist_group)
 
-        # Categorization
         cat_group = QGroupBox("Categorization")
         cat_layout = QVBoxLayout()
 
@@ -207,54 +181,46 @@ class ThresholdWidget(QWidget):
         if current in label_layers:
             self._seg_combo.setCurrentText(current)
 
-    def _refresh_table_combo(self) -> None:
-        """Repopulate the table combo from the current registry."""
-        tables = get_registered_tables()
-        current = self._table_combo.currentText()
-        self._table_combo.blockSignals(True)
-        self._table_combo.clear()
-        self._table_combo.addItems(list(tables.keys()))
-        if current in tables:
-            self._table_combo.setCurrentText(current)
-        self._table_combo.blockSignals(False)
-        self._on_table_selected(self._table_combo.currentText())
+    def _current_features(self) -> pd.DataFrame | None:
+        seg_name = self._seg_combo.currentText()
+        if not seg_name or seg_name not in [l.name for l in self._viewer.layers]:
+            return None
+        layer = self._viewer.layers[seg_name]
+        feats = getattr(layer, "features", None)
+        if feats is None or len(feats.columns) == 0:
+            return None
+        return feats
 
-    def _on_table_selected(self, name: str) -> None:
-        """Load the named table from the registry into the widget."""
-        if not name:
-            return
-        tables = get_registered_tables()
-        if name not in tables:
-            return
-        self._measurements = tables[name].copy()
-        populate_table_widget(self._table, self._measurements)
+    def _on_seg_selected(self, name: str) -> None:
         self._update_col_combo()
 
     def _update_col_combo(self) -> None:
-        if self._measurements is None:
-            return
-        numeric_cols = [
-            c for c in self._measurements.select_dtypes(include="number").columns
-            if c not in ("label", "category_id")
-        ]
-        current = self._col_combo.currentText()
+        feats = self._current_features()
         self._col_combo.blockSignals(True)
         self._col_combo.clear()
-        self._col_combo.addItems(numeric_cols)
-        if current in numeric_cols:
-            self._col_combo.setCurrentText(current)
+        if feats is not None:
+            numeric_cols = [
+                c for c in feats.select_dtypes(include="number").columns
+                if c not in ("index", "category_id")
+            ]
+            self._col_combo.addItems(numeric_cols)
         self._col_combo.blockSignals(False)
         self._update_histogram()
 
     def _update_histogram(self) -> None:
-        if self._hist_ax is None or self._measurements is None:
+        if self._hist_ax is None:
             return
-        col = self._col_combo.currentText()
-        if not col or col not in self._measurements.columns:
-            return
+        feats = self._current_features()
         ax = self._hist_ax
         ax.clear()
-        values = self._measurements[col].values
+        if feats is None:
+            self._hist_canvas.draw()
+            return
+        col = self._col_combo.currentText()
+        if not col or col not in feats.columns:
+            self._hist_canvas.draw()
+            return
+        values = feats[col].values
         ax.hist(values, bins=20, color="steelblue", alpha=0.7)
         ax.set_xlabel(col)
         ax.set_ylabel("count")
@@ -265,13 +231,14 @@ class ThresholdWidget(QWidget):
 
     def _suggest_thresholds(self) -> None:
         from segmentation_measurement.analysis import suggest_thresholds
-        if self._measurements is None:
+        feats = self._current_features()
+        if feats is None:
             return
         col = self._col_combo.currentText()
         if not col:
             return
         n = self._n_spin.value()
-        thresholds = suggest_thresholds(self._measurements, col, n)
+        thresholds = suggest_thresholds(feats, col, n)
         for spin, val in zip(self._threshold_spins, thresholds):
             spin.blockSignals(True)
             spin.setValue(val)
@@ -280,26 +247,28 @@ class ThresholdWidget(QWidget):
 
     def _run_categorization(self) -> None:
         from segmentation_measurement.analysis import categorize_by_threshold
-        if self._measurements is None:
+        seg_name = self._seg_combo.currentText()
+        if not seg_name:
+            return
+        seg_layer = self._viewer.layers[seg_name]
+        feats = getattr(seg_layer, "features", None)
+        if feats is None or len(feats.columns) == 0:
             return
         col = self._col_combo.currentText()
         if not col:
             return
         thresholds = [spin.value() for spin in self._threshold_spins]
         names = [edit.text() for edit in self._name_edits]
-        self._measurements = categorize_by_threshold(
-            self._measurements, col, thresholds, names
-        )
-        populate_table_widget(self._table, self._measurements)
+        categorized = categorize_by_threshold(feats, col, thresholds, names)
+        # Only push back the new columns (avoid round-tripping unchanged ones).
+        new_cols = categorized[["index", "category_id", "category_name"]]
+        merge_features_into_layer(seg_layer, new_cols)
 
-        seg_name = self._seg_combo.currentText()
-        if not seg_name:
-            return
-        segmentation = self._viewer.layers[seg_name].data
+        segmentation = seg_layer.data
         result = np.zeros_like(segmentation)
         for label_id, cat_id in zip(
-            self._measurements["label"].values,
-            self._measurements["category_id"].values,
+            categorized["index"].values,
+            categorized["category_id"].values,
         ):
             result[segmentation == int(label_id)] = int(cat_id)
         out_name = self._out_name.text() or "categories"
@@ -309,14 +278,4 @@ class ThresholdWidget(QWidget):
         else:
             self._viewer.add_labels(result, name=out_name)
 
-    def _save_table(self) -> None:
-        if self._measurements is None:
-            return
-        path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Save table",
-            "",
-            "CSV (*.csv);;TSV (*.tsv);;Excel (*.xlsx);;All Files (*)",
-        )
-        if path:
-            save_table(self._measurements, path)
+        show_features_table(self._viewer, seg_layer)

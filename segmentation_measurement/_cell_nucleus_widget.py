@@ -2,23 +2,22 @@
 
 from __future__ import annotations
 
-import pandas as pd
 import napari
 from qtpy.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
-    QFileDialog,
     QGroupBox,
     QHBoxLayout,
     QLabel,
     QPushButton,
-    QScrollArea,
-    QTableWidget,
     QVBoxLayout,
     QWidget,
 )
 
-from segmentation_measurement._utils import populate_table_widget, register_table, save_table
+from segmentation_measurement._layer_features import (
+    merge_features_into_layer,
+    show_features_table,
+)
 
 _AXIS_LABELS_2D = ("Y", "X")
 _AXIS_LABELS_3D = ("Z", "Y", "X")
@@ -27,6 +26,9 @@ _NO_IMAGE = "(none)"
 
 class CellNucleusWidget(QWidget):
     """Widget for measuring per-cell properties combining cell and nucleus segmentations.
+
+    The result is merged into the cell layer's ``features`` and shown in
+    napari's built-in *Features Table* dock, which is opened automatically.
 
     Scale spinboxes are populated from the cell segmentation layer's physical
     pixel/voxel size (from its ``scale`` attribute) or 1.0 if not set.  One
@@ -37,7 +39,6 @@ class CellNucleusWidget(QWidget):
     def __init__(self, napari_viewer: napari.Viewer) -> None:
         super().__init__()
         self._viewer = napari_viewer
-        self._measurements: pd.DataFrame | None = None
         self._scale_spins: list[QDoubleSpinBox] = []
         self._scale_layout: QVBoxLayout | None = None
         self._setup_ui()
@@ -46,17 +47,8 @@ class CellNucleusWidget(QWidget):
         self._update_layer_combos()
 
     def _setup_ui(self) -> None:
-        outer_layout = QVBoxLayout()
-        self.setLayout(outer_layout)
-
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        outer_layout.addWidget(scroll)
-
-        inner = QWidget()
-        scroll.setWidget(inner)
         layout = QVBoxLayout()
-        inner.setLayout(layout)
+        self.setLayout(layout)
 
         cell_layout = QHBoxLayout()
         cell_layout.addWidget(QLabel("Cell segmentation:"))
@@ -87,16 +79,7 @@ class CellNucleusWidget(QWidget):
         self._measure_btn.clicked.connect(self._run_measurement)
         layout.addWidget(self._measure_btn)
 
-        table_group = QGroupBox("Measurements")
-        table_layout = QVBoxLayout()
-        self._table = QTableWidget()
-        self._table.setMinimumHeight(150)
-        table_layout.addWidget(self._table)
-        save_btn = QPushButton("Save table")
-        save_btn.clicked.connect(self._save_table)
-        table_layout.addWidget(save_btn)
-        table_group.setLayout(table_layout)
-        layout.addWidget(table_group)
+        layout.addStretch()
 
     def _rebuild_scale_spins(self, ndim: int, scale_values: list) -> None:
         while self._scale_layout.count():
@@ -164,7 +147,7 @@ class CellNucleusWidget(QWidget):
         nuc_name = self._nuc_combo.currentText()
         if not cell_name or not nuc_name or not self._scale_spins:
             return
-        cell_seg = self._viewer.layers[cell_name].data
+        cell_layer = self._viewer.layers[cell_name]
         nuc_seg = self._viewer.layers[nuc_name].data
 
         img_name = self._img_combo.currentText()
@@ -175,20 +158,8 @@ class CellNucleusWidget(QWidget):
         )
 
         scale = tuple(spin.value() for spin in self._scale_spins)
-        self._measurements = measure_cell_nucleus(
-            cell_seg, nuc_seg, scale=scale, intensity_image=intensity
+        df = measure_cell_nucleus(
+            cell_layer.data, nuc_seg, scale=scale, intensity_image=intensity
         )
-        populate_table_widget(self._table, self._measurements)
-        register_table(f"Cell-Nucleus ({cell_name})", self._measurements)
-
-    def _save_table(self) -> None:
-        if self._measurements is None:
-            return
-        path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Save measurements",
-            "",
-            "CSV (*.csv);;TSV (*.tsv);;Excel (*.xlsx);;All Files (*)",
-        )
-        if path:
-            save_table(self._measurements, path)
+        merge_features_into_layer(cell_layer, df)
+        show_features_table(self._viewer, cell_layer)

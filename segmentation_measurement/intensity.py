@@ -7,7 +7,7 @@ import pandas as pd
 from skimage.measure import regionprops
 
 _COLUMNS = [
-    "label", "mean_intensity", "median_intensity", "max_intensity",
+    "index", "mean_intensity", "median_intensity", "max_intensity",
     "min_intensity", "std_intensity",
     "percentile_10", "percentile_25", "percentile_75", "percentile_90",
 ]
@@ -26,10 +26,11 @@ def measure_intensities(segmentation: np.ndarray, intensity_image: np.ndarray) -
             ``segmentation``.
 
     Returns:
-        pd.DataFrame: One row per segment with columns ``label``,
+        pd.DataFrame: One row per segment with columns ``index``,
             ``mean_intensity``, ``median_intensity``, ``max_intensity``,
             ``min_intensity``, ``std_intensity``, ``percentile_10``,
             ``percentile_25``, ``percentile_75``, ``percentile_90``.
+            ``index`` holds the integer label ID of each segment.
     """
     props = regionprops(segmentation, intensity_image)
     if not props:
@@ -37,9 +38,14 @@ def measure_intensities(segmentation: np.ndarray, intensity_image: np.ndarray) -
 
     rows = []
     for region in props:
-        intensities = region.intensity_image[region.image].astype(float)
+        # ``image_intensity`` was renamed in scikit-image 0.26; keep the old
+        # ``intensity_image`` name as a fallback for older versions.
+        intensity_arr = getattr(region, "image_intensity", None)
+        if intensity_arr is None:
+            intensity_arr = region.intensity_image
+        intensities = intensity_arr[region.image].astype(float)
         rows.append({
-            "label": region.label,
+            "index": region.label,
             "mean_intensity": float(np.mean(intensities)),
             "median_intensity": float(np.median(intensities)),
             "max_intensity": float(np.max(intensities)),

@@ -34,6 +34,18 @@ Open any widget from the napari menu:
 
 All widgets appear as dockable panels that can be placed anywhere in the napari window.
 
+### Working with measurement tables
+
+Measurement and analysis results are stored as the `features` table of the source
+Labels layer.  napari ships a built-in **Features Table** dock
+(**Layers → Visualize → Features table widget**) that displays this table for the
+currently selected layer.  Whenever a widget in this plugin writes to a layer's
+features (after a measurement, after applying a threshold/cluster/classifier, after
+loading or editing a table), the dock is opened automatically and the source layer
+is selected so the result is visible immediately.  The dock supports sorting,
+in-place editing, copy/paste, CSV save, and bidirectional row ↔ viewer selection
+sync.
+
 ---
 
 ## Postprocessing Widget
@@ -124,16 +136,13 @@ widget.
 The Intensity Measurement widget computes per-segment intensity statistics from a label
 layer and a co-registered intensity image.
 
-### Layout (scrollable)
+### Layout
 
 ```
 ┌─────────────────────────────────┐
 │ Segmentation:    [combo]        │
 │ Intensity image: [combo]        │
 │ [Measure intensities]           │
-│ ┌ Measurements ──────────────┐ │
-│ │  <table>  [Save table]     │ │
-│ └────────────────────────────┘ │
 └─────────────────────────────────┘
 ```
 
@@ -143,11 +152,17 @@ layer and a co-registered intensity image.
 2. Select an **Intensity image** layer (Image) from the second dropdown.
 3. Click **Measure intensities**.
 
-The **Measurements** table is filled with one row per segment.  The columns are:
+The result is merged into the segmentation layer's `features` table and the napari
+**Features Table** dock is opened automatically with the segmentation layer selected.
+Re-running the measurement on the same layer silently overwrites the existing
+intensity columns; running a different measurement (e.g. Morphology) on the same
+layer adds its columns alongside.
+
+The columns added to `layer.features` are:
 
 | Column | Description |
 |--------|-------------|
-| `label` | Integer segment label ID |
+| `index` | Integer segment label ID |
 | `mean_intensity` | Mean pixel intensity |
 | `median_intensity` | Median pixel intensity |
 | `max_intensity` | Maximum pixel intensity |
@@ -158,18 +173,11 @@ The **Measurements** table is filled with one row per segment.  The columns are:
 | `percentile_75` | 75th percentile (Q3) |
 | `percentile_90` | 90th percentile |
 
-The table is also registered internally so that the **Threshold Analysis**,
-**Clustering Analysis**, and **Classification Analysis** widgets can access it directly
-(see below).
-
 ### Saving the table
 
-Click **Save table** to export the measurements to a file.  A file-save dialog opens
-and lets you choose the location and format:
-
-* **CSV** (`.csv`) – comma-separated values
-* **TSV** (`.tsv`) – tab-separated values
-* **Excel** (`.xlsx`) – Excel workbook
+Use the **Save as CSV** button in the napari Features Table dock to export the
+features.  For TSV / XLSX export, use the **Save table** button in the
+[Table Manipulation Widget](#table-manipulation-widget) below.
 
 ---
 
@@ -189,9 +197,6 @@ real-world units.
 │ │ X: [spinbox]               │ │
 │ └────────────────────────────┘ │
 │ [Measure morphology]            │
-│ ┌ Measurements ──────────────┐ │
-│ │  <table>  [Save table]     │ │
-│ └────────────────────────────┘ │
 └─────────────────────────────────┘
 ```
 
@@ -206,13 +211,19 @@ For 3-D data a third spinbox **Z** is added automatically.
    to all axes; for anisotropic data set each axis independently.
 3. Click **Measure morphology**.
 
-The **Measurements** table is filled with one row per segment.
+The result is merged into the segmentation layer's `features` table and the napari
+**Features Table** dock is opened automatically with the segmentation layer selected.
+Re-running the measurement on the same layer silently overwrites the morphology
+columns; running a different measurement on the same layer adds its columns
+alongside.
+
+The columns added to `layer.features` (one row per segment) are:
 
 **2-D columns**
 
 | Column | Description |
 |--------|-------------|
-| `label` | Integer segment label ID |
+| `index` | Integer segment label ID |
 | `area` | Area in physical units (px² or µm² etc.) |
 | `perimeter` | Perimeter length in physical units |
 | `sphericity` | Circularity: 1.0 for a perfect circle, <1 for elongated or irregular shapes |
@@ -225,7 +236,7 @@ The **Measurements** table is filled with one row per segment.
 
 | Column | Description |
 |--------|-------------|
-| `label` | Integer segment label ID |
+| `index` | Integer segment label ID |
 | `volume` | Volume in physical units (vx³ or µm³ etc.) |
 | `surface_area` | Surface area computed via marching cubes |
 | `sphericity` | 1.0 for a perfect sphere, <1 for elongated or irregular shapes |
@@ -234,28 +245,23 @@ The **Measurements** table is filled with one row per segment.
 | `axis_minor_length` | Length of the minor axis of the fitted ellipsoid |
 | `equivalent_diameter` | Diameter of a sphere with the same volume |
 
-The table is also registered internally so that the **Threshold Analysis**,
-**Clustering Analysis**, and **Classification Analysis** widgets can access it directly.
-
 ### Saving the table
 
-Click **Save table** to export the measurements (same formats as Intensity Measurement).
+Use the **Save as CSV** button in the napari Features Table dock, or the
+**Save table** button in the [Table Manipulation Widget](#table-manipulation-widget)
+for TSV / XLSX output.
 
 ---
 
 ## Threshold Analysis Widget
 
 The Threshold Analysis widget categorizes segments into named groups based on one or more
-thresholds applied to any numeric column in a previously computed measurement table.
+thresholds applied to any numeric column of the selected layer's `features` table.
 
 ### Layout (scrollable)
 
 ```
 ┌──────────────────────────────────────┐
-│ ┌ Measurement table ───────────────┐ │
-│ │ Table: [combo]  [Refresh]        │ │
-│ │  <table>  [Save table]           │ │
-│ └──────────────────────────────────┘ │
 │ Segmentation: [combo]                │
 │ ┌ Column histogram ────────────────┐ │
 │ │ Column: [combo]                  │ │
@@ -274,15 +280,16 @@ thresholds applied to any numeric column in a previously computed measurement ta
 
 ### Workflow
 
-#### Step 1 – Select a measurement table
+#### Step 1 – Select the segmentation layer
 
-The widget operates on tables produced by the **Intensity Measurement** or **Morphology
-Measurement** widgets in the same napari session.
+The widget operates on the `features` table of the selected Labels layer (populated
+by **Intensity Measurement**, **Morphology Measurement**, **Cell-Nucleus
+Measurement**, or by loading a CSV via the [Table Manipulation
+Widget](#table-manipulation-widget)).
 
-1. Run one of the measurement widgets first.
-2. Click **Refresh** to populate the **Table** dropdown with all available tables.
-3. Select the desired table from the dropdown.  The table is displayed and the
-   **Column** dropdown is filled with its numeric columns (excluding `label`).
+1. Run one of the measurement widgets first (or load a CSV).
+2. Pick the layer from the **Segmentation** dropdown.  The **Column** dropdown is
+   filled with its numeric columns (excluding `index`).
 
 #### Step 2 – Explore the histogram
 
@@ -302,14 +309,14 @@ it.
    selected column.  The threshold lines on the histogram update in real time.
 3. Optionally rename each category in the **Name** fields (defaults:
    `category_1`, `category_2`, …).
-4. Select the **Segmentation** layer to use for the output label layer.
-5. Enter an **Output layer** name (default: `categories`).
-6. Click **Categorize**.
+4. Enter an **Output layer** name (default: `categories`).
+5. Click **Categorize**.
 
 Two things happen:
 
-* The measurements table gains two new columns: `category_id` (integer, 1-based) and
-  `category_name` (string).
+* The source layer's `features` gains two new columns: `category_id` (integer,
+  1-based) and `category_name` (string).  The Features Table dock is opened
+  automatically with the source layer selected so you can inspect them.
 * A new Labels layer is created (or updated) in napari where each segment is assigned its
   category ID as the label value.  Use napari's built-in colormap controls to distinguish
   the categories visually.
@@ -341,9 +348,6 @@ statistics.
 │ │ X: [spinbox]                    │ │
 │ └─────────────────────────────────┘ │
 │ [Measure cell-nucleus]              │
-│ ┌ Measurements ─────────────────┐  │
-│ │  <table>  [Save table]        │  │
-│ └───────────────────────────────┘  │
 └─────────────────────────────────────┘
 ```
 
@@ -361,13 +365,15 @@ For 3-D data a third spinbox **Z** is added automatically.
 4. Adjust the per-axis scale values if needed (same convention as the Morphology widget).
 5. Click **Measure cell-nucleus**.
 
-The **Measurements** table is filled with one row per cell.
+The result is merged into the **cell** segmentation layer's `features` table and the
+napari **Features Table** dock is opened automatically with that layer selected.
+One row per cell.
 
 **Columns – without intensity image (2-D)**
 
 | Column | Description |
 |--------|-------------|
-| `label` | Integer cell label ID |
+| `index` | Integer cell label ID |
 | `n_nuclei` | Number of nucleus labels overlapping with this cell |
 | `cell_area` | Area of the whole cell in physical units (nucleus included) |
 | `nucleus_area` | Total area of nuclei within this cell in physical units |
@@ -388,13 +394,11 @@ When an intensity image is selected, columns are added for each statistic `{stat
 | `nucleus_{stat}_intensity` | Statistic over all nuclear pixels within this cell |
 | `{stat}_intensity_ratio` | `cell_{stat}_intensity / nucleus_{stat}_intensity`; `NaN` when either region is empty or the nucleus value is zero |
 
-The table is also registered internally so that the **Threshold Analysis**,
-**Clustering Analysis**, and **Classification Analysis** widgets can access it directly.
-
 ### Saving the table
 
-Click **Save table** to export the measurements (same formats as Intensity Measurement:
-CSV, TSV, Excel).
+Use the **Save as CSV** button in the napari Features Table dock, or the
+**Save table** button in the [Table Manipulation Widget](#table-manipulation-widget)
+for TSV / XLSX output.
 
 ---
 
@@ -410,10 +414,6 @@ kept in sync.
 
 ```
 ┌──────────────────────────────────────┐
-│ ┌ Measurement table ───────────────┐ │
-│ │ Table: [combo]  [Refresh]        │ │
-│ │  <table>  [Save table]           │ │
-│ └──────────────────────────────────┘ │
 │ Segmentation: [combo]                │
 │ ┌ Feature reduction ───────────────┐ │
 │ │ Method: [UMAP▾]  [Reduce]        │ │
@@ -430,15 +430,11 @@ kept in sync.
 
 ### Workflow
 
-#### Step 1 – Select a measurement table
+#### Step 1 – Select the segmentation layer
 
-The widget operates on tables produced by the **Intensity Measurement**,
-**Morphology Measurement**, or **Cell-Nucleus Measurement** widgets in the same napari
-session.
-
-1. Run one of the measurement widgets first.
-2. Click **Refresh** to populate the **Table** dropdown with all available tables.
-3. Select the desired table.  The table is displayed in the widget.
+The widget operates on the `features` table of the selected Labels layer.  Run a
+measurement widget first (or load a CSV via the Table Manipulation widget), then
+pick the layer from the **Segmentation** dropdown.
 
 #### Step 2 – Explore the feature space (optional)
 
@@ -456,12 +452,13 @@ session.
 1. Select a **Clustering method** from the dropdown (see table below).
 2. Adjust the method-specific parameters shown below the dropdown.
 3. Enter an **Output layer** name (default: `clusters`).
-4. Select the **Segmentation** layer to use for the output.
-5. Click **Cluster**.
+4. Click **Cluster**.
 
 Three things happen simultaneously:
 
-* The measurements table gains a new `cluster_id` column (1-based; `-1` for noise).
+* The source layer's `features` gains a new `cluster_id` column (1-based; `-1` for
+  noise) and the napari Features Table dock is opened automatically with that layer
+  selected.
 * The scatter plot is redrawn with each point coloured by its cluster.
 * A new Labels layer is created (or updated) where each segment is painted with its
   `cluster_id`.  The layer colours are set to **exactly match** the scatter-plot colours.
@@ -493,8 +490,9 @@ overlay always show identical colours.
 
 ### Saving the table
 
-Click **Save table** to export the measurements with the cluster column (CSV, TSV, or
-Excel).
+Use the **Save as CSV** button in the napari Features Table dock, or the
+**Save table** button in the [Table Manipulation Widget](#table-manipulation-widget)
+for TSV / XLSX output.
 
 ---
 
@@ -510,14 +508,10 @@ table.  Trained classifiers can be exported to disk and reloaded later.
 
 ```
 ┌──────────────────────────────────────┐
-│ ┌ Measurement table ───────────────┐ │
-│ │ Table: [combo]  [Refresh]        │ │
-│ │  <table>  [Save table]           │ │
-│ └──────────────────────────────────┘ │
 │ ┌ Layers ──────────────────────────┐ │
 │ │ Segmentation: [combo]            │ │
 │ │ Annotation layer: [combo] [Create new] │
-│ │ [Project annotations to table]   │ │
+│ │ [Project annotations to features]│ │
 │ └──────────────────────────────────┘ │
 │ ┌ Class names ─────────────────────┐ │
 │ │  Label ID │ Class Name           │ │
@@ -535,22 +529,17 @@ table.  Trained classifiers can be exported to disk and reloaded later.
 
 ### Workflow
 
-#### Step 1 – Select a measurement table
+#### Step 1 – Select the segmentation layer
 
-The widget operates on tables produced by the **Intensity Measurement**,
-**Morphology Measurement**, or **Cell-Nucleus Measurement** widgets in the same napari
-session.
-
-1. Run one of the measurement widgets first.
-2. Click **Refresh** to populate the **Table** dropdown with all available tables.
-3. Select the desired table.  The table is displayed in the widget.
+The widget operates on the `features` table of the selected Labels layer.  Run a
+measurement widget first (or load a CSV via the Table Manipulation widget), then
+pick the layer from the **Segmentation** dropdown.
 
 #### Step 2 – Create an annotation layer
 
-1. Select the **Segmentation** layer that the table was derived from.
-2. Click **Create new** next to the **Annotation layer** dropdown.  A new, empty Labels
+1. Click **Create new** next to the **Annotation layer** dropdown.  A new, empty Labels
    layer called `annotations` is added to napari and automatically selected.
-3. Alternatively, select an existing Labels layer from the **Annotation layer** dropdown
+2. Alternatively, select an existing Labels layer from the **Annotation layer** dropdown
    if you already have annotations you want to use.
 
 #### Step 3 – Paint annotations
@@ -562,19 +551,20 @@ Use napari's built-in label painting tools to draw brushstrokes on the annotatio
 * Paint at least a few representative segments from each class.  You do not need to
   annotate every segment — the classifier will be applied to the rest automatically.
 
-#### Step 4 – Project annotations to the table
+#### Step 4 – Project annotations into features
 
-Click **Project annotations to table**.  The widget:
+Click **Project annotations to features**.  The widget:
 
 1. Reads the pixel-level brushstrokes from the annotation layer.
 2. For each segment in the segmentation, takes the **majority-vote** annotation label
    across all annotated pixels that overlap that segment.  Segments with no annotation
    overlap receive annotation `0` (unannotated).
-3. Writes an `annotation` column to the measurement table (displayed in the widget).
+3. Merges an `annotation` column into the source layer's `features` (overwriting any
+   previous annotation values).  The Features Table dock is opened automatically.
 4. Populates the **Class names** table with all annotation label IDs detected.
 
 > **Tip:** Repeat steps 3 and 4 as many times as needed.  Each click of **Project
-> annotations to table** re-reads the current state of the annotation layer.
+> annotations to features** re-reads the current state of the annotation layer.
 
 #### Step 5 – Name the classes (optional)
 
@@ -593,12 +583,14 @@ field.  Click a name cell and type to rename a class (e.g. change `class_1` to
 Three things happen:
 
 * A scikit-learn classifier is trained on all rows where `annotation > 0`, using all
-  numeric measurement columns as features (excluding `label`, `annotation`,
+  numeric measurement columns as features (excluding `index`, `annotation`,
   `classification_id`, `classification_name`, `cluster_id`, `category_id`, and
   `category_name`).  Features are z-score standardised internally.
-* The classifier is applied to **every** row in the table (including unannotated ones).
-  Results are written to two new columns: `classification_id` (1-based integer) and
-  `classification_name` (string).
+* The classifier is applied to **every** row in the layer's features (including
+  unannotated ones).  Results are merged back into the source layer's `features` as
+  two new columns: `classification_id` (1-based integer) and `classification_name`
+  (string).  The Features Table dock is opened automatically with that layer
+  selected.
 * A new Labels layer is created (or updated) in napari where each segment is painted with
   its `classification_id`.  Distinct colours are assigned per class using the `tab10`
   colormap.
@@ -636,70 +628,55 @@ above) or used with the `analyze classify` CLI command to apply it to new tables
 
 ### Saving the table
 
-Click **Save table** to export the measurement table with the `classification_id` and
-`classification_name` columns (CSV, TSV, or Excel).
+Use the **Save as CSV** button in the napari Features Table dock, or the
+**Save table** button in the [Table Manipulation Widget](#table-manipulation-widget)
+for TSV / XLSX output.
 
 ---
 
 ## Table Manipulation Widget
 
-The Table Manipulation widget loads, edits, and combines measurement tables.  It is
-useful for stitching together independently produced measurements (e.g. intensity and
-morphology) into one table that can then be passed to a downstream analysis widget,
-and for cleaning up tables before analysis or export.
+The Table Manipulation widget edits the `features` table of a Labels layer.  It can
+load an external CSV / TSV / XLSX file (which must contain an `index` column) and
+merge it into the layer's features, drop a column from the layer's features, and
+save the layer's features to a CSV / TSV / XLSX file.
 
 ### Layout
 
 ```
 ┌────────────────────────────────────────┐
-│ ┌ Load table ────────────────────────┐ │
-│ │ From plugin: [combo] [Refresh] [Load] │
-│ │ From file:   [Load file…]          │ │
-│ └────────────────────────────────────┘ │
-│ ┌ Current table ─────────────────────┐ │
-│ │ Loaded: <name>                     │ │
-│ │ [QTableWidget]                     │ │
+│ Segmentation: [combo]                  │
+│ ┌ Load table from file ──────────────┐ │
+│ │ [Load file…]                       │ │
 │ └────────────────────────────────────┘ │
 │ ┌ Drop column ───────────────────────┐ │
 │ │ Column: [combo]   [Drop]           │ │
-│ └────────────────────────────────────┘ │
-│ ┌ Merge with table ──────────────────┐ │
-│ │ Other table: [combo]   [Merge]     │ │
 │ └────────────────────────────────────┘ │
 │ [Save table]                            │
 └────────────────────────────────────────┘
 ```
 
-### Loading a table
+### Loading a table from file
 
-Two sources are supported:
+Click **Load file…** to read a CSV, TSV, or XLSX file.  The file must contain an
+`index` column whose values are the segment label IDs; loading is rejected
+otherwise.  The columns of the loaded file are merged into the selected layer's
+`features` (outer join on `index`).  Columns present in both the file and the
+existing features are overwritten with the values from the file.  The Features
+Table dock is opened automatically after the merge.
 
-* **From plugin** — Pick a table that was produced by another widget
-  (Intensity, Morphology, Cell-Nucleus, …).  Click **Refresh** if a recently
-  produced table does not yet appear in the dropdown, then **Load** to
-  display it.
-* **From file** — Click **Load file…** to read a CSV, TSV, or XLSX file.
-  The widget verifies that the file contains a `label` column and refuses
-  to load it otherwise.
-
-After loading, the widget registers the table in the in-memory registry under
-the source name (or the file stem) so that downstream analysis widgets can
-pick it up immediately.
+> **Tip:** Multiple measurement widgets writing to the same layer follow the same
+> merge rules — running Intensity then Morphology on the same Labels layer leaves
+> all columns from both measurements in the layer's `features`.
 
 ### Dropping a column
 
-Select a column from the **Drop column** dropdown and click **Drop**.  The
-displayed table is updated in place; the change is also propagated back to
-the registered table.  The `label` column is the segment identifier and is
-never offered for dropping.
-
-### Merging another table
-
-Select a registered measurement table from the **Other table** dropdown and
-click **Merge**.  The widget performs an outer join on the `label` column.
-If the other table contains columns that are also in the current table the
-merge is rejected with a dialog — drop the conflicting columns first.
+Select a column from the **Drop column** dropdown and click **Drop**.  The column
+is removed from the selected layer's `features`.  The `index` column is the
+segment identifier and is never offered for dropping.
 
 ### Saving the table
 
-Click **Save table** to export the current table to CSV, TSV, or Excel.
+Click **Save table** to export the selected layer's `features` to a CSV, TSV, or
+XLSX file.  This complements the napari Features Table dock's CSV-only save by
+also supporting TSV and Excel output.

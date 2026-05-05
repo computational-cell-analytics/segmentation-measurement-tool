@@ -7,11 +7,11 @@ import pandas as pd
 from skimage.measure import regionprops
 
 _COLUMNS_2D = [
-    "label", "area", "perimeter", "sphericity", "solidity",
+    "index", "area", "perimeter", "sphericity", "solidity",
     "axis_major_length", "axis_minor_length", "equivalent_diameter",
 ]
 _COLUMNS_3D = [
-    "label", "volume", "surface_area", "sphericity", "solidity",
+    "index", "volume", "surface_area", "sphericity", "solidity",
     "axis_major_length", "axis_minor_length", "equivalent_diameter",
 ]
 
@@ -40,10 +40,11 @@ def measure_morphology(
             order for 3D. Defaults to 1.0 (pixel/voxel units).
 
     Returns:
-        pd.DataFrame: One row per segment.  2D columns: ``label``, ``area``,
+        pd.DataFrame: One row per segment.  ``index`` holds the integer label
+            ID of each segment.  2D columns: ``index``, ``area``,
             ``perimeter``, ``sphericity``, ``solidity``, ``axis_major_length``,
             ``axis_minor_length``, ``equivalent_diameter``.  3D columns:
-            ``label``, ``volume``, ``surface_area``, ``sphericity``,
+            ``index``, ``volume``, ``surface_area``, ``sphericity``,
             ``solidity``, ``axis_major_length``, ``axis_minor_length``,
             ``equivalent_diameter``.
 
@@ -76,7 +77,7 @@ def measure_morphology(
 
     rows = []
     for region in props:
-        row: dict = {"label": region.label, "solidity": float(region.solidity)}
+        row: dict = {"index": region.label, "solidity": float(region.solidity)}
 
         if ndim == 2:
             area = float(region.area)  # physical area via spacing
