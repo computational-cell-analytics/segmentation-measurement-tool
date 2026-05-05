@@ -43,3 +43,15 @@ contributions:
       display_name: Classification Analysis
     - command: segmentation-measurement.table_manipulation_widget
       display_name: Table Manipulation
+  menus:
+    napari/layers/segment:
+      - command: segmentation-measurement.postprocessing_widget
+    napari/layers/measure:
+      - command: segmentation-measurement.intensity_widget
+      - command: segmentation-measurement.morphology_widget
+      - command: segmentation-measurement.cell_nucleus_widget
+      - command: segmentation-measurement.table_manipulation_widget
+    napari/layers/classify:
+      - command: segmentation-measurement.threshold_widget
+      - command: segmentation-measurement.clustering_widget
+      - command: segmentation-measurement.classification_widget

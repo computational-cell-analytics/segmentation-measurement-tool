@@ -14,23 +14,19 @@ After installation the plugin is automatically discovered by napari.
 
 ## Opening the Widgets
 
-Open any widget from the napari menu:
+All widgets are accessible from two locations in the napari menu bar:
 
-**Plugins → Segmentation Measurement → Postprocessing**
+**Layers menu** — widgets are grouped by what they do, alongside napari's
+built-in layer actions:
 
-**Plugins → Segmentation Measurement → Intensity Measurement → Intensity Measurement**
+| Layers submenu | Widgets |
+|----------------|---------|
+| **Layers → Segment** | Postprocessing |
+| **Layers → Measure** | Intensity Measurement, Morphology Measurement, Cell-Nucleus Measurement, Table Manipulation |
+| **Layers → Classify** | Threshold Analysis, Clustering Analysis, Classification Analysis |
 
-**Plugins → Segmentation Measurement → Morphology Measurement → Morphology Measurement**
-
-**Plugins → Segmentation Measurement → Threshold Analysis → Threshold Analysis**
-
-**Plugins → Segmentation Measurement → Cell-Nucleus Measurement → Cell-Nucleus Measurement**
-
-**Plugins → Segmentation Measurement → Clustering Analysis → Clustering Analysis**
-
-**Plugins → Segmentation Measurement → Classification Analysis → Classification Analysis**
-
-**Plugins → Segmentation Measurement → Table Manipulation → Table Manipulation**
+**Plugins menu** — every widget also appears in a flat list under
+**Plugins → Segmentation Measurement → \<widget name\>** for direct access.
 
 All widgets appear as dockable panels that can be placed anywhere in the napari window.
 
