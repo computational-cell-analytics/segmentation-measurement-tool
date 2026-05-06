@@ -183,6 +183,7 @@ def test_target_combo_lists_groups(make_napari_viewer, qtbot):
     assert items() == ["<single layer>"]
     set_group(viewer, "exp_1", {ROLE_SEGMENTATION: ["cells_01"]})
     assert "exp_1" in items()
+    assert widget._target_combo.currentText() == "exp_1"
 
 
 @_CI_XFAIL
@@ -206,11 +207,14 @@ def test_group_mode_concat_features(make_napari_viewer, qtbot):
 
 @_CI_XFAIL
 def test_group_mode_writes_back_per_layer(make_napari_viewer, qtbot):
+    from napari.layers.utils._link_layers import get_linked_layers
     from segmentation_measurement._clustering_widget import ClusteringWidget
     from segmentation_measurement._groups import ROLE_SEGMENTATION, set_group
     viewer = make_napari_viewer()
     layer1 = _make_seg_with_features(viewer, n=20, name="cells_01")
     layer2 = _make_seg_with_features(viewer, n=20, name="cells_02")
+    layer1.translate = (0.0, 0.0)
+    layer2.translate = (0.0, 30.0)
     set_group(
         viewer, "exp_1", {ROLE_SEGMENTATION: ["cells_01", "cells_02"]}
     )
@@ -226,6 +230,11 @@ def test_group_mode_writes_back_per_layer(make_napari_viewer, qtbot):
     layer_names = [layer.name for layer in viewer.layers]
     assert "clust_cells_01" in layer_names
     assert "clust_cells_02" in layer_names
+    assert tuple(viewer.layers["clust_cells_01"].translate) == (0.0, 0.0)
+    assert tuple(viewer.layers["clust_cells_02"].translate) == (0.0, 30.0)
+    assert viewer.layers["clust_cells_02"] in get_linked_layers(
+        viewer.layers["clust_cells_01"]
+    )
 
 
 def test_works_with_morphology_features(make_napari_viewer, qtbot):

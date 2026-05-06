@@ -291,3 +291,108 @@ def test_delete_selected_removes_group(make_napari_viewer, qtbot):
     widget._delete_selected()
     assert list_groups(viewer) == []
     assert widget._group_list.count() == 0
+
+
+def test_arrange_selected_group_as_grid_positions_matching_layers(
+    make_napari_viewer, qtbot
+):
+    from segmentation_measurement._groups_widget import GroupManagerWidget
+    viewer = make_napari_viewer()
+    viewer.add_labels(np.zeros((10, 10), dtype=int), name="cells_01")
+    viewer.add_labels(np.zeros((10, 10), dtype=int), name="cells_02")
+    viewer.add_labels(np.zeros((10, 10), dtype=int), name="cells_03")
+    viewer.add_labels(np.zeros((10, 10), dtype=int), name="nuclei_01")
+    viewer.add_labels(np.zeros((10, 10), dtype=int), name="nuclei_02")
+    viewer.add_labels(np.zeros((10, 10), dtype=int), name="nuclei_03")
+    viewer.add_image(np.zeros((10, 10), dtype=float), name="raw_01")
+    viewer.add_image(np.zeros((10, 10), dtype=float), name="raw_02")
+    viewer.add_image(np.zeros((10, 10), dtype=float), name="raw_03")
+    set_group(
+        viewer,
+        "exp_1",
+        {
+            ROLE_SEGMENTATION: ["cells_01", "cells_02", "cells_03"],
+            ROLE_NUCLEUS_SEGMENTATION: ["nuclei_01", "nuclei_02", "nuclei_03"],
+            ROLE_INTENSITY_IMAGE: ["raw_01", "raw_02", "raw_03"],
+        },
+    )
+    widget = GroupManagerWidget(viewer)
+    qtbot.addWidget(widget)
+    widget._group_list.setCurrentRow(0)
+    widget._arrange_selected_as_grid()
+
+    expected = {
+        "01": (0.0, 0.0),
+        "02": (0.0, 10.0),
+        "03": (10.0, 0.0),
+    }
+    for suffix, translate in expected.items():
+        assert tuple(viewer.layers[f"cells_{suffix}"].translate) == translate
+        assert tuple(viewer.layers[f"nuclei_{suffix}"].translate) == translate
+        assert tuple(viewer.layers[f"raw_{suffix}"].translate) == translate
+
+
+def test_arrange_selected_group_stacks_segmentation_above_matches(
+    make_napari_viewer, qtbot
+):
+    from segmentation_measurement._groups_widget import GroupManagerWidget
+    viewer = make_napari_viewer()
+    viewer.add_labels(np.zeros((10, 10), dtype=int), name="cells_01")
+    viewer.add_labels(np.zeros((10, 10), dtype=int), name="nuclei_01")
+    viewer.add_image(np.zeros((10, 10), dtype=float), name="raw_01")
+    set_group(
+        viewer,
+        "exp_1",
+        {
+            ROLE_SEGMENTATION: ["cells_01"],
+            ROLE_NUCLEUS_SEGMENTATION: ["nuclei_01"],
+            ROLE_INTENSITY_IMAGE: ["raw_01"],
+        },
+    )
+    widget = GroupManagerWidget(viewer)
+    qtbot.addWidget(widget)
+    widget._group_list.setCurrentRow(0)
+    widget._arrange_selected_as_grid()
+
+    assert [layer.name for layer in viewer.layers][-3:] == [
+        "raw_01",
+        "nuclei_01",
+        "cells_01",
+    ]
+
+
+def test_arrange_selected_group_links_layers_by_role(
+    make_napari_viewer, qtbot
+):
+    from napari.layers.utils._link_layers import get_linked_layers
+    from segmentation_measurement._groups_widget import GroupManagerWidget
+    viewer = make_napari_viewer()
+    viewer.add_labels(np.zeros((10, 10), dtype=int), name="cells_01")
+    viewer.add_labels(np.zeros((10, 10), dtype=int), name="cells_02")
+    viewer.add_labels(np.zeros((10, 10), dtype=int), name="nuclei_01")
+    viewer.add_labels(np.zeros((10, 10), dtype=int), name="nuclei_02")
+    viewer.add_image(np.zeros((10, 10), dtype=float), name="raw_01")
+    viewer.add_image(np.zeros((10, 10), dtype=float), name="raw_02")
+    set_group(
+        viewer,
+        "exp_1",
+        {
+            ROLE_SEGMENTATION: ["cells_01", "cells_02"],
+            ROLE_NUCLEUS_SEGMENTATION: ["nuclei_01", "nuclei_02"],
+            ROLE_INTENSITY_IMAGE: ["raw_01", "raw_02"],
+        },
+    )
+    widget = GroupManagerWidget(viewer)
+    qtbot.addWidget(widget)
+    widget._group_list.setCurrentRow(0)
+    widget._arrange_selected_as_grid()
+
+    assert viewer.layers["cells_02"] in get_linked_layers(
+        viewer.layers["cells_01"]
+    )
+    assert viewer.layers["nuclei_02"] in get_linked_layers(
+        viewer.layers["nuclei_01"]
+    )
+    assert viewer.layers["raw_02"] in get_linked_layers(viewer.layers["raw_01"])
+    assert tuple(viewer.layers["cells_01"].translate) == (0.0, 0.0)
+    assert tuple(viewer.layers["cells_02"].translate) == (0.0, 10.0)

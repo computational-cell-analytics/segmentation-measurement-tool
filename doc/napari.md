@@ -778,6 +778,7 @@ for the underlying data model and pairing semantics.
 │ │  exp_2  (5 seg)                    │ │
 │ │  ...                               │ │
 │ │ [Delete selected]                  │ │
+│ │ [Arrange selected as grid]         │ │
 │ └────────────────────────────────────┘ │
 │ ┌ Group editor ──────────────────────┐ │
 │ │ Name: [edit]                       │ │
@@ -828,6 +829,16 @@ for the underlying data model and pairing semantics.
 Selecting a group in the top list loads its current members back into
 the editor for editing.  Click **Delete selected** to remove the
 highlighted group.
+
+Click **Arrange selected as grid** to lay out the highlighted group in
+the viewer.  The grid has one cell per segmentation layer.  Nucleus and
+intensity layers, when present, are translated to the same grid cell as
+their position-matched segmentation layer.  For each grid cell, the
+intensity image is stacked below the nucleus segmentation, and the
+segmentation layer is stacked on top.  Layers are linked by role
+(segmentations with segmentations, nucleus segmentations with nucleus
+segmentations, intensity images with intensity images) while spatial
+transforms remain independent so the grid positions are preserved.
 
 Renaming a layer that a group references automatically updates the
 group's stored layer name.  Removing a layer leaves the dangling
