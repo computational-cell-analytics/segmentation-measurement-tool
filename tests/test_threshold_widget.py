@@ -174,6 +174,7 @@ def test_target_combo_lists_groups(make_napari_viewer, qtbot):
     assert items() == ["<single layer>"]
     set_group(viewer, "exp_1", {ROLE_SEGMENTATION: ["cells_01"]})
     assert "exp_1" in items()
+    assert widget._target_combo.currentText() == "exp_1"
     assert "<all groups>" not in items()
 
 
@@ -227,6 +228,7 @@ def test_multi_member_histogram_uses_concat(make_napari_viewer, qtbot):
 def test_multi_member_categorize_writes_back_per_layer(
     make_napari_viewer, qtbot
 ):
+    from napari.layers.utils._link_layers import get_linked_layers
     from segmentation_measurement._groups import ROLE_SEGMENTATION, set_group
     from segmentation_measurement._threshold_widget import ThresholdWidget
     seg1 = np.zeros((20, 20), dtype=np.int32)
@@ -239,6 +241,8 @@ def test_multi_member_categorize_writes_back_per_layer(
     viewer = make_napari_viewer()
     layer1 = _seg_with_features(viewer, seg1, df1, name="cells_01")
     layer2 = _seg_with_features(viewer, seg2, df2, name="cells_02")
+    layer1.translate = (0.0, 0.0)
+    layer2.translate = (0.0, 20.0)
     set_group(
         viewer, "exp_1", {ROLE_SEGMENTATION: ["cells_01", "cells_02"]}
     )
@@ -255,6 +259,11 @@ def test_multi_member_categorize_writes_back_per_layer(
     layer_names = [layer.name for layer in viewer.layers]
     assert "cats_cells_01" in layer_names
     assert "cats_cells_02" in layer_names
+    assert tuple(viewer.layers["cats_cells_01"].translate) == (0.0, 0.0)
+    assert tuple(viewer.layers["cats_cells_02"].translate) == (0.0, 20.0)
+    assert viewer.layers["cats_cells_02"] in get_linked_layers(
+        viewer.layers["cats_cells_01"]
+    )
 
 
 def test_single_member_group_no_suffix(make_napari_viewer, qtbot):

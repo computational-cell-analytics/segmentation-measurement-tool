@@ -31,14 +31,17 @@ from segmentation_measurement._groups import (
     subscribe,
 )
 from segmentation_measurement._layer_features import (
-    concat_features_for_group,
     merge_features_into_layer,
     show_features_table,
     split_and_merge_back,
 )
+from segmentation_measurement._utils import copy_layer_spatial_metadata
+from segmentation_measurement._utils import link_layers_preserving_grid
 
 _TARGET_SINGLE = "<single layer>"
 _NONE_ANN = "(none)"
+_ANNOTATION_PREVIEW_MAX_CLASS_ID = 10
+_ANNOTATION_CMAP_CONNECTED_KEY = "_segmentation_measurement_annotation_cmap"
 
 
 class ClassificationWidget(QWidget):
@@ -78,8 +81,10 @@ class ClassificationWidget(QWidget):
         # annotation arrays produced by ``_compress_annotation``.
         self._member_annotations: dict[str, dict] = {}
         self._current_member: str | None = None
+        self._annotation_colormap_updating = False
         self._setup_ui()
         self._seg_combo.currentTextChanged.connect(self._on_seg_combo_changed)
+        self._ann_combo.currentTextChanged.connect(self._on_ann_combo_changed)
         self._viewer.layers.events.inserted.connect(self._update_layer_combos)
         self._viewer.layers.events.removed.connect(self._update_layer_combos)
         self._unsubscribe = subscribe(self._viewer, self._update_target_combo)
@@ -261,7 +266,11 @@ class ClassificationWidget(QWidget):
             self._target_combo.itemText(i)
             for i in range(self._target_combo.count())
         ]
-        if current in items:
+        if current in groups:
+            self._target_combo.setCurrentText(current)
+        elif len(groups) == 1:
+            self._target_combo.setCurrentText(groups[0])
+        elif current in items:
             self._target_combo.setCurrentText(current)
         else:
             self._target_combo.setCurrentText(_TARGET_SINGLE)
@@ -288,13 +297,29 @@ class ClassificationWidget(QWidget):
         # Member-switch persistence applies only in group mode.
         if self._target_combo.currentText() == _TARGET_SINGLE:
             self._current_member = None
+            self._sync_annotation_layer_to_segmentation()
             return
         if not name or name == self._current_member:
+            self._sync_annotation_layer_to_segmentation()
             return
         if self._current_member is not None:
             self._save_member_annotations(self._current_member)
         self._load_member_annotations(name)
         self._current_member = name
+
+    def _on_ann_combo_changed(self, name: str) -> None:
+        if not name or name == _NONE_ANN:
+            return
+        ann = self._ann_layer()
+        if ann is not None:
+            self._prepare_annotation_layer(ann)
+        if self._target_combo.currentText() != _TARGET_SINGLE:
+            member = self._seg_combo.currentText()
+            if member:
+                self._load_member_annotations(member)
+                self._current_member = member
+                return
+        self._sync_annotation_layer_to_segmentation()
 
     def _save_member_annotations(self, member_name: str) -> None:
         """Snapshot the current annotation layer's data for ``member_name``."""
@@ -308,12 +333,25 @@ class ClassificationWidget(QWidget):
         ann = self._ann_layer()
         if ann is None or member_name not in self._viewer.layers:
             return
+        if ann.name == member_name:
+            return
         seg = self._viewer.layers[member_name]
         cached = self._member_annotations.get(member_name)
         if cached is not None and cached["shape"] == tuple(seg.data.shape):
             ann.data = _decompress_annotation(cached)
         else:
             ann.data = np.zeros(seg.data.shape, dtype=np.int32)
+        copy_layer_spatial_metadata(seg, ann)
+
+    def _sync_annotation_layer_to_segmentation(self) -> None:
+        """Place the active annotation layer over the selected segmentation."""
+        seg = self._seg_layer()
+        ann = self._ann_layer()
+        if seg is None or ann is None or ann.name == seg.name:
+            return
+        if tuple(ann.data.shape) != tuple(seg.data.shape):
+            ann.data = np.zeros(seg.data.shape, dtype=np.int32)
+        copy_layer_spatial_metadata(seg, ann)
 
     def _ann_layer(self) -> object | None:
         ann_name = self._ann_combo.currentText()
@@ -389,12 +427,34 @@ class ClassificationWidget(QWidget):
         target = self._target_combo.currentText()
         if target == _TARGET_SINGLE:
             return self._current_features()
+        return self._features_for_classifier_group(target)
+
+    def _features_for_classifier_group(self, target: str) -> pd.DataFrame | None:
         try:
-            return concat_features_for_group(
-                self._viewer, target, ROLE_SEGMENTATION
-            )
+            members = get_group(self._viewer, target)
         except (ValueError, KeyError):
             return None
+        frames = []
+        column_set: set[str] | None = None
+        for layer_name in members.get(ROLE_SEGMENTATION, []):
+            if layer_name not in self._viewer.layers:
+                return None
+            feats = getattr(self._viewer.layers[layer_name], "features", None)
+            if feats is None or len(feats.columns) == 0:
+                return None
+            frame = feats.copy()
+            if "annotation" not in frame.columns:
+                frame["annotation"] = 0
+            cols = set(frame.columns)
+            if column_set is None:
+                column_set = cols
+            elif cols != column_set:
+                return None
+            frame["_source_layer"] = layer_name
+            frames.append(frame)
+        if not frames:
+            return None
+        return pd.concat(frames, ignore_index=True)
 
     # ---------------------------------------------------------- Annotation ---
 
@@ -404,6 +464,8 @@ class ClassificationWidget(QWidget):
             return
         ann_data = np.zeros_like(seg.data, dtype=np.int32)
         layer = self._viewer.add_labels(ann_data, name="annotations")
+        copy_layer_spatial_metadata(seg, layer)
+        self._prepare_annotation_layer(layer)
         self._ann_combo.setCurrentText(layer.name)
 
     def _project_annotations(self) -> None:
@@ -416,6 +478,7 @@ class ClassificationWidget(QWidget):
         ann_name = self._ann_combo.currentText()
         if not ann_name or ann_name == _NONE_ANN or ann_name == seg.name:
             return
+        self._sync_annotation_layer_to_segmentation()
         ann_data = self._viewer.layers[ann_name].data
         if seg.data.shape != ann_data.shape:
             return
@@ -432,6 +495,7 @@ class ClassificationWidget(QWidget):
         merge_features_into_layer(seg, ann_df)
 
         self._update_class_names_table(self._collect_annotation_ids())
+        self._apply_annotation_colormap()
         show_features_table(self._viewer, seg)
 
     def _collect_annotation_ids(self) -> list[int]:
@@ -477,6 +541,7 @@ class ClassificationWidget(QWidget):
             self._class_names_table.setItem(row, 0, id_item)
             name = existing.get(ann_id, f"class_{ann_id}")
             self._class_names_table.setItem(row, 1, QTableWidgetItem(name))
+        self._apply_annotation_colormap()
 
     def _get_class_names(self) -> dict[int, str]:
         names: dict[int, str] = {}
@@ -566,6 +631,7 @@ class ClassificationWidget(QWidget):
 
         suffix_per_member = len(seg_layers) > 1
         first_layer = None
+        output_layers = []
         for seg_name in seg_layers:
             if seg_name not in self._viewer.layers:
                 continue
@@ -574,9 +640,14 @@ class ClassificationWidget(QWidget):
             layer_out_name = (
                 f"{out_name}_{seg_name}" if suffix_per_member else out_name
             )
-            self._create_output_layer(seg_layer, sub, layer_out_name, max_class)
+            output_layers.append(
+                self._create_output_layer(
+                    seg_layer, sub, layer_out_name, max_class
+                )
+            )
             if first_layer is None:
                 first_layer = seg_layer
+        link_layers_preserving_grid(self._viewer, output_layers)
         if first_layer is not None:
             show_features_table(self._viewer, first_layer)
 
@@ -586,7 +657,7 @@ class ClassificationWidget(QWidget):
         result: pd.DataFrame,
         out_name: str,
         max_class: int | None = None,
-    ) -> None:
+    ) -> object:
         seg_data = seg_layer.data
         out = np.zeros_like(seg_data, dtype=np.int32)
         for lbl, cid in zip(
@@ -602,11 +673,49 @@ class ClassificationWidget(QWidget):
             layer.data = out
         else:
             layer = self._viewer.add_labels(out, name=out_name)
+        copy_layer_spatial_metadata(seg_layer, layer)
 
         unique_cids = sorted(
             int(c) for c in result["classification_id"].unique() if int(c) > 0
         )
         _apply_class_colors(layer, unique_cids, max_class)
+        return layer
+
+    def _apply_annotation_colormap(self, ann: object | None = None) -> None:
+        if self._annotation_colormap_updating:
+            return
+        if ann is None:
+            ann = self._ann_layer()
+        if ann is None:
+            return
+        ids = self._annotation_colormap_ids(ann)
+        self._annotation_colormap_updating = True
+        try:
+            _apply_class_colors(ann, ids, max(ids))
+        finally:
+            self._annotation_colormap_updating = False
+
+    def _annotation_colormap_ids(self, ann: object) -> list[int]:
+        ids = set(range(1, _ANNOTATION_PREVIEW_MAX_CLASS_ID + 1))
+        ids.update(self._collect_annotation_ids())
+        selected = int(getattr(ann, "selected_label", 1))
+        if selected > 0:
+            ids.add(selected)
+        return sorted(ids)
+
+    def _prepare_annotation_layer(self, ann: object) -> None:
+        metadata = getattr(ann, "metadata", None)
+        if isinstance(metadata, dict) and not metadata.get(
+            _ANNOTATION_CMAP_CONNECTED_KEY, False
+        ):
+            try:
+                ann.events.selected_label.connect(
+                    lambda _event=None: self._apply_annotation_colormap()
+                )
+                metadata[_ANNOTATION_CMAP_CONNECTED_KEY] = True
+            except AttributeError:
+                pass
+        self._apply_annotation_colormap(ann)
 
     def _export_classifier(self) -> None:
         if self._classifier is None:
@@ -725,7 +834,9 @@ def _class_color_dict(
         dict[int, tuple]: ``{class_id: rgba}`` with RGBA tuples from
             either the ``tab10`` or ``tab20`` matplotlib colormap.
     """
-    if not class_ids:
+    if max_class is not None:
+        class_ids = list(range(1, max_class + 1))
+    elif not class_ids:
         return {}
     n = max_class if max_class is not None else max(class_ids)
     try:
@@ -747,7 +858,7 @@ def _apply_class_colors(
     Uses ``DirectLabelColormap`` (napari >= 0.5).  Silently skips if the
     API is unavailable or no class IDs are provided.
     """
-    if not class_ids:
+    if not class_ids and max_class is None:
         return
     try:
         from napari.utils.colormaps import DirectLabelColormap

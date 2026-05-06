@@ -155,6 +155,7 @@ def test_target_combo_lists_groups(make_napari_viewer, qtbot):
     assert items() == ["<single layer>"]
     set_group(viewer, "exp_1", {ROLE_SEGMENTATION: ["cells_01"]})
     assert "exp_1" in items()
+    assert widget._target_combo.currentText() == "exp_1"
     assert "<all groups>" not in items()
 
 

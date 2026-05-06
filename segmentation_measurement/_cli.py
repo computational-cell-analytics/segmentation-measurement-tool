@@ -3,11 +3,20 @@
 from __future__ import annotations
 
 import argparse
+import glob
+from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 import tifffile
 
 from segmentation_measurement._utils import load_table, save_table
+
+
+@dataclass(frozen=True)
+class _OpenPath:
+    path: Path
+    layer_name: str
 
 
 def _load_segmentation(path: str) -> np.ndarray:
@@ -16,6 +25,76 @@ def _load_segmentation(path: str) -> np.ndarray:
 
 def _save_segmentation(segmentation: np.ndarray, path: str) -> None:
     tifffile.imwrite(path, segmentation)
+
+
+def _has_glob_magic(pattern: str) -> bool:
+    return any(char in pattern for char in "*?[")
+
+
+def _glob_root(pattern: str) -> Path:
+    path = Path(pattern)
+    parts = path.parts
+    wildcard_index = next(
+        i for i, part in enumerate(parts) if _has_glob_magic(part)
+    )
+    root_parts = parts[:wildcard_index]
+    if not root_parts:
+        return Path(".")
+    return Path(*root_parts)
+
+
+def _layer_name_for_path(path: Path, root: Path | None) -> str:
+    if root is None:
+        name_path = path.name
+    else:
+        try:
+            name_path = path.relative_to(root)
+        except ValueError:
+            name_path = path.name
+    return Path(name_path).with_suffix("").as_posix()
+
+
+def _expand_open_paths(patterns: list[str], role: str) -> list[_OpenPath]:
+    """Expand file paths or glob expressions for the napari ``open`` command."""
+    expanded: list[_OpenPath] = []
+    for pattern in patterns:
+        if _has_glob_magic(pattern):
+            root = _glob_root(pattern)
+            matches = sorted(
+                Path(path) for path in glob.glob(pattern, recursive=True)
+                if Path(path).is_file()
+            )
+            if not matches:
+                raise ValueError(
+                    f"No files matched {role} glob expression: {pattern}"
+                )
+            expanded.extend(
+                _OpenPath(path, _layer_name_for_path(path, root))
+                for path in matches
+            )
+        else:
+            path = Path(pattern)
+            if not path.is_file():
+                raise ValueError(f"{role.capitalize()} path is not a file: {pattern}")
+            expanded.append(_OpenPath(path, _layer_name_for_path(path, None)))
+    return expanded
+
+
+def _validate_open_path_counts(
+    segmentations: list[_OpenPath],
+    intensities: list[_OpenPath] | None,
+    nuclei: list[_OpenPath] | None,
+) -> None:
+    n_segmentations = len(segmentations)
+    for role, paths in (
+        ("intensity image", intensities),
+        ("nucleus segmentation", nuclei),
+    ):
+        if paths is not None and len(paths) != n_segmentations:
+            raise ValueError(
+                f"Expected {n_segmentations} {role} path(s) to match the "
+                f"number of segmentation paths, got {len(paths)}."
+            )
 
 
 def cmd_filter_small_segments(args: argparse.Namespace) -> None:
@@ -168,6 +247,68 @@ def cmd_table_merge(args: argparse.Namespace) -> None:
     save_table(result, args.output)
 
 
+def cmd_open(args: argparse.Namespace) -> None:
+    """Open segmentations and optional matched images in napari."""
+    import napari
+    from segmentation_measurement._groups import (
+        ROLE_INTENSITY_IMAGE,
+        ROLE_NUCLEUS_SEGMENTATION,
+        ROLE_SEGMENTATION,
+        set_group,
+    )
+
+    segmentations = _expand_open_paths(args.segmentations, "segmentation")
+    intensities = (
+        _expand_open_paths(args.intensities, "intensity image")
+        if args.intensities
+        else None
+    )
+    nuclei = (
+        _expand_open_paths(args.nuclei, "nucleus segmentation")
+        if args.nuclei
+        else None
+    )
+    _validate_open_path_counts(segmentations, intensities, nuclei)
+
+    viewer = napari.Viewer()
+    seg_layers = [
+        viewer.add_labels(tifffile.imread(item.path), name=item.layer_name)
+        for item in segmentations
+    ]
+    nucleus_layers = []
+    if nuclei is not None:
+        nucleus_layers = [
+            viewer.add_labels(tifffile.imread(item.path), name=item.layer_name)
+            for item in nuclei
+        ]
+    intensity_layers = []
+    if intensities is not None:
+        intensity_layers = [
+            viewer.add_image(tifffile.imread(item.path), name=item.layer_name)
+            for item in intensities
+        ]
+
+    if len(seg_layers) > 1 and not args.no_group:
+        members = {ROLE_SEGMENTATION: [layer.name for layer in seg_layers]}
+        if nucleus_layers:
+            members[ROLE_NUCLEUS_SEGMENTATION] = [
+                layer.name for layer in nucleus_layers
+            ]
+        if intensity_layers:
+            members[ROLE_INTENSITY_IMAGE] = [
+                layer.name for layer in intensity_layers
+            ]
+        group_name = args.group_name
+        set_group(viewer, group_name, members)
+        if not args.no_grid:
+            from segmentation_measurement._groups_widget import GroupManagerWidget
+            arranger = GroupManagerWidget(viewer)
+            arranger._arrange_group_as_grid(members)
+            arranger.deleteLater()
+
+    napari.run()
+
+
 def cmd_analyze_threshold(args: argparse.Namespace) -> None:
     """Execute the analyze-threshold sub-command."""
     from segmentation_measurement.analysis import (
@@ -200,6 +341,57 @@ def main() -> None:
     )
     subparsers = parser.add_subparsers(dest="command")
     subparsers.required = True
+
+    open_parser = subparsers.add_parser(
+        "open",
+        help="Open segmentations and optional matched images in napari.",
+    )
+    open_parser.add_argument(
+        "--segmentations",
+        nargs="+",
+        required=True,
+        help=(
+            "Segmentation file path(s) or glob expression(s). Glob patterns "
+            "are expanded recursively when they include **."
+        ),
+    )
+    open_parser.add_argument(
+        "--intensities",
+        nargs="+",
+        default=None,
+        help=(
+            "Optional intensity image file path(s) or glob expression(s). "
+            "The expanded count must match --segmentations."
+        ),
+    )
+    open_parser.add_argument(
+        "--nuclei",
+        "--nucleus-segmentations",
+        nargs="+",
+        default=None,
+        help=(
+            "Optional nucleus segmentation file path(s) or glob expression(s). "
+            "The expanded count must match --segmentations."
+        ),
+    )
+    open_parser.add_argument(
+        "--no-group",
+        action="store_true",
+        default=False,
+        help="Do not create a group when opening multiple segmentations.",
+    )
+    open_parser.add_argument(
+        "--no-grid",
+        action="store_true",
+        default=False,
+        help="Create the group but do not arrange it as a grid.",
+    )
+    open_parser.add_argument(
+        "--group-name",
+        default="opened_files",
+        help="Name for the automatically created group.",
+    )
+    open_parser.set_defaults(func=cmd_open)
 
     # --- postprocess ---
     pp_parser = subparsers.add_parser("postprocess", help="Post-processing utilities.")
@@ -502,7 +694,12 @@ def main() -> None:
     train_clf.set_defaults(func=cmd_analyze_train_classifier)
 
     args = parser.parse_args()
-    args.func(args)
+    try:
+        args.func(args)
+    except ValueError as exc:
+        if args.command == "open":
+            parser.error(str(exc))
+        raise
 
 
 if __name__ == "__main__":

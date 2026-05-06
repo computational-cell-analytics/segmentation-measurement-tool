@@ -14,10 +14,11 @@ After installation the `segmentation-measurement` command is available in your s
 
 ## Overview
 
-The CLI exposes four top-level commands:
+The CLI exposes five top-level commands:
 
 | Command | Description |
 |---------|-------------|
+| `open` | Open segmentations and optional matched images in napari |
 | `postprocess` | Apply post-processing operations to segmentation TIFF files |
 | `measure` | Compute per-segment measurements from segmentation TIFF files |
 | `table` | Manipulate measurement tables (merge tables, drop columns) |
@@ -27,9 +28,71 @@ Run any command with `--help` to see its full usage:
 
 ```bash
 segmentation-measurement --help
+segmentation-measurement open --help
 segmentation-measurement postprocess --help
 segmentation-measurement measure morphology --help
 segmentation-measurement analyze threshold --help
+```
+
+---
+
+## Open In Napari (`open`)
+
+Open one or more segmentation files in napari, optionally with matched
+intensity images and nucleus segmentations.  Paths may be single file paths
+or glob expressions.  Recursive glob expressions using `**` are supported.
+
+```bash
+segmentation-measurement open \
+    --segmentations "data/**/cells*.tif" \
+    --intensities "data/**/raw*.tif" \
+    --nuclei "data/**/nuclei*.tif"
+```
+
+Segmentations and nuclei are opened as Labels layers.  Intensities are opened
+as Image layers.  When a glob expression is used, layer names are derived
+relative to the directory above the first wildcard component.  For example,
+`data/**/seg.tif` creates names such as `well_a/seg` and `well_b/seg`, so
+files with the same basename in different subfolders remain distinguishable.
+
+If multiple segmentations are opened, the default behavior is to create a
+group named `opened_files` and arrange the matched layers in a grid view.  Use
+`--no-grid` to keep the group but skip grid arrangement, or `--no-group` to
+skip both grouping and grid arrangement.
+
+**Arguments**
+
+| Argument | Type | Required | Description |
+|----------|------|----------|-------------|
+| `--segmentations` | path/glob list | yes | Segmentation file path(s) or glob expression(s) |
+| `--intensities` | path/glob list | no | Optional intensity image path(s); expanded count must match segmentations |
+| `--nuclei`, `--nucleus-segmentations` | path/glob list | no | Optional nucleus segmentation path(s); expanded count must match segmentations |
+| `--no-group` | flag | no | Do not create a group when multiple segmentations are opened |
+| `--no-grid` | flag | no | Create the group but do not arrange it as a grid |
+| `--group-name` | string | no | Name for the created group; default is `opened_files` |
+
+**Examples**
+
+Open a single segmentation:
+
+```bash
+segmentation-measurement open --segmentations cells_01.tif
+```
+
+Open matched files as a grouped grid:
+
+```bash
+segmentation-measurement open \
+    --segmentations "experiment/**/cells.tif" \
+    --intensities "experiment/**/raw.tif" \
+    --nuclei "experiment/**/nuclei.tif" \
+    --group-name experiment
+```
+
+Open multiple segmentations without grouping:
+
+```bash
+segmentation-measurement open --segmentations "cells_*.tif" --no-group
 ```
 
 ---

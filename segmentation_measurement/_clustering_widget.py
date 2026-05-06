@@ -32,6 +32,10 @@ from segmentation_measurement._layer_features import (
     show_features_table,
     split_and_merge_back,
 )
+from segmentation_measurement._utils import (
+    copy_layer_spatial_metadata,
+    link_layers_preserving_grid,
+)
 
 _TARGET_SINGLE = "<single layer>"
 
@@ -280,7 +284,11 @@ class ClusteringWidget(QWidget):
             self._target_combo.itemText(i)
             for i in range(self._target_combo.count())
         ]
-        if current in items:
+        if current in groups:
+            self._target_combo.setCurrentText(current)
+        elif len(groups) == 1:
+            self._target_combo.setCurrentText(groups[0])
+        elif current in items:
             self._target_combo.setCurrentText(current)
         else:
             self._target_combo.setCurrentText(_TARGET_SINGLE)
@@ -490,6 +498,7 @@ class ClusteringWidget(QWidget):
 
         suffix_per_member = len(seg_layers) > 1
         first_layer = None
+        output_layers = []
         for seg_name in seg_layers:
             if seg_name not in self._viewer.layers:
                 continue
@@ -498,9 +507,12 @@ class ClusteringWidget(QWidget):
             layer_out_name = (
                 f"{out_name}_{seg_name}" if suffix_per_member else out_name
             )
-            self._build_label_layer(seg_layer, sub, layer_out_name)
+            output_layers.append(
+                self._build_label_layer(seg_layer, sub, layer_out_name)
+            )
             if first_layer is None:
                 first_layer = seg_layer
+        link_layers_preserving_grid(self._viewer, output_layers)
         if first_layer is not None:
             show_features_table(self._viewer, first_layer)
 
@@ -509,7 +521,7 @@ class ClusteringWidget(QWidget):
         source_layer: object,
         clustered: pd.DataFrame,
         out_name: str,
-    ) -> None:
+    ) -> object:
         segmentation = source_layer.data
         result = np.zeros_like(segmentation)
         for label_id, cluster_id in zip(
@@ -524,7 +536,9 @@ class ClusteringWidget(QWidget):
             layer.data = result
         else:
             layer = self._viewer.add_labels(result, name=out_name)
+        copy_layer_spatial_metadata(source_layer, layer)
         _apply_cluster_colors(layer, self._cluster_colors)
+        return layer
 
 
 def _get_cluster_colors(n: int) -> list[tuple]:

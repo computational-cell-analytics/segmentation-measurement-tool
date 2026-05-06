@@ -311,6 +311,7 @@ def test_target_combo_lists_groups(make_napari_viewer, qtbot):
     assert items() == ["<single layer>"]
     set_group(viewer, "exp_1", {ROLE_SEGMENTATION: ["cells_01"]})
     assert "exp_1" in items()
+    assert widget._target_combo.currentText() == "exp_1"
 
 
 def test_group_mode_seg_combo_restricted_to_members(make_napari_viewer, qtbot):
@@ -335,11 +336,14 @@ def test_group_mode_seg_combo_restricted_to_members(make_napari_viewer, qtbot):
 
 @_CI_XFAIL
 def test_group_mode_train_and_apply(make_napari_viewer, qtbot):
+    from napari.layers.utils._link_layers import get_linked_layers
     from segmentation_measurement._classification_widget import ClassificationWidget
     from segmentation_measurement._groups import ROLE_SEGMENTATION, set_group
     viewer = make_napari_viewer()
     layer1 = _make_seg_with_features(viewer, n=20, name="cells_01")
     layer2 = _make_seg_with_features(viewer, n=20, name="cells_02")
+    layer1.translate = (0.0, 0.0)
+    layer2.translate = (0.0, 30.0)
     set_group(
         viewer, "exp_1", {ROLE_SEGMENTATION: ["cells_01", "cells_02"]}
     )
@@ -355,6 +359,39 @@ def test_group_mode_train_and_apply(make_napari_viewer, qtbot):
     layer_names = [layer.name for layer in viewer.layers]
     assert "cls_cells_01" in layer_names
     assert "cls_cells_02" in layer_names
+    assert tuple(viewer.layers["cls_cells_01"].translate) == (0.0, 0.0)
+    assert tuple(viewer.layers["cls_cells_02"].translate) == (0.0, 30.0)
+    assert viewer.layers["cls_cells_02"] in get_linked_layers(
+        viewer.layers["cls_cells_01"]
+    )
+
+
+@_CI_XFAIL
+def test_group_mode_train_with_unprojected_member(make_napari_viewer, qtbot):
+    from segmentation_measurement._classification_widget import ClassificationWidget
+    from segmentation_measurement._groups import ROLE_SEGMENTATION, set_group
+
+    viewer = make_napari_viewer()
+    layer1 = _make_seg_with_features(viewer, n=20, name="cells_01")
+    unannotated = _make_annotated_df(20).drop(columns=["annotation"])
+    layer2 = _make_seg_with_features(
+        viewer, n=20, features=unannotated, name="cells_02"
+    )
+    set_group(
+        viewer, "exp_1", {ROLE_SEGMENTATION: ["cells_01", "cells_02"]}
+    )
+    widget = ClassificationWidget(viewer)
+    qtbot.addWidget(widget)
+    widget._target_combo.setCurrentText("exp_1")
+    widget._method_combo.setCurrentText("Random Forest")
+    widget._update_class_names_table([1, 2])
+    widget._out_name.setText("cls")
+    widget._train_and_apply()
+
+    assert "classification_id" in layer1.features.columns
+    assert "classification_id" in layer2.features.columns
+    assert "cls_cells_01" in [layer.name for layer in viewer.layers]
+    assert "cls_cells_02" in [layer.name for layer in viewer.layers]
 
 
 def test_class_color_dict_deterministic_per_id():
@@ -382,6 +419,18 @@ def test_class_color_dict_picks_tab20_for_many_classes():
     import matplotlib
     cmap20 = matplotlib.colormaps["tab20"]
     assert colors[12] == tuple(cmap20(11))
+
+
+def test_apply_class_colors_keeps_missing_global_classes_visible(
+    make_napari_viewer,
+):
+    from segmentation_measurement._classification_widget import _apply_class_colors
+    viewer = make_napari_viewer()
+    layer = viewer.add_labels(np.zeros((10, 10), dtype=np.int32), name="cls")
+    _apply_class_colors(layer, [3], max_class=3)
+    assert layer.colormap.color_dict[1][3] > 0
+    assert layer.colormap.color_dict[2][3] > 0
+    assert layer.colormap.color_dict[3][3] > 0
 
 
 def test_compress_decompress_round_trip():
@@ -487,6 +536,71 @@ def test_member_persistence_round_trip(make_napari_viewer, qtbot):
     widget._seg_combo.setCurrentText("cells_02")
     np.testing.assert_array_equal(ann.data[20:25, 20:25], 2)
     assert int(ann.data[5:10, 5:10].sum()) == 0
+
+
+def test_group_annotation_layer_follows_member_and_projects(
+    make_napari_viewer, qtbot
+):
+    from segmentation_measurement._classification_widget import (
+        ClassificationWidget,
+        _class_color_dict,
+    )
+    from segmentation_measurement._groups import ROLE_SEGMENTATION, set_group
+
+    viewer = make_napari_viewer()
+    layer1 = _make_seg_with_features(viewer, n=20, name="cells_01")
+    layer2 = _make_seg_with_features(viewer, n=20, name="cells_02")
+    layer1.translate = (0.0, 0.0)
+    layer2.translate = (0.0, 30.0)
+    set_group(
+        viewer, "exp_1", {ROLE_SEGMENTATION: ["cells_01", "cells_02"]}
+    )
+
+    widget = ClassificationWidget(viewer)
+    qtbot.addWidget(widget)
+    widget._target_combo.setCurrentText("exp_1")
+    widget._create_annotation_layer()
+    ann = viewer.layers[widget._ann_combo.currentText()]
+
+    assert tuple(ann.translate) == (0.0, 0.0)
+    expected_colors = _class_color_dict([1, 2], max_class=10)
+    np.testing.assert_allclose(ann.colormap.color_dict[1], expected_colors[1])
+    np.testing.assert_allclose(ann.colormap.color_dict[2], expected_colors[2])
+    ann_data = np.zeros((30, 30), dtype=np.int32)
+    ann_data[1, 6] = 1
+    ann.data = ann_data
+    widget._project_annotations()
+    feats1 = layer1.features.set_index("index")
+    assert int(feats1.loc[1, "annotation"]) == 1
+    ann.selected_label = 3
+    assert ann.colormap.color_dict[3][3] > 0
+    ann.brush_size = 1
+    ann.paint((3, 8), ann.selected_label)
+    assert int(ann.data[3, 8]) == 3
+    widget._project_annotations()
+    feats1 = layer1.features.set_index("index")
+    assert int(feats1.loc[3, "annotation"]) == 3
+
+    widget._seg_combo.setCurrentText("cells_02")
+    assert tuple(ann.translate) == (0.0, 30.0)
+    assert int(ann.data.sum()) == 0
+    ann_data = np.zeros((30, 30), dtype=np.int32)
+    ann_data[2, 7] = 2
+    ann.data = ann_data
+    widget._project_annotations()
+    feats2 = layer2.features.set_index("index")
+    assert int(feats2.loc[2, "annotation"]) == 2
+
+    widget._seg_combo.setCurrentText("cells_01")
+    assert tuple(ann.translate) == (0.0, 0.0)
+    assert int(ann.data[1, 6]) == 1
+    feats1 = layer1.features.set_index("index")
+    feats2 = layer2.features.set_index("index")
+    assert int(feats1.loc[1, "annotation"]) == 1
+    assert int(feats2.loc[2, "annotation"]) == 2
+    expected_colors = _class_color_dict([1, 2], max_class=10)
+    np.testing.assert_allclose(ann.colormap.color_dict[1], expected_colors[1])
+    np.testing.assert_allclose(ann.colormap.color_dict[2], expected_colors[2])
 
 
 def test_persistence_inactive_in_single_mode(make_napari_viewer, qtbot):
