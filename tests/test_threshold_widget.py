@@ -157,6 +157,129 @@ def test_categorize_updates_existing_layer(make_napari_viewer, qtbot):
     assert len(viewer.layers) == n_layers
 
 
+def test_target_combo_lists_groups(make_napari_viewer, qtbot):
+    from segmentation_measurement._groups import ROLE_SEGMENTATION, set_group
+    from segmentation_measurement._threshold_widget import ThresholdWidget
+    viewer = make_napari_viewer()
+    df = pd.DataFrame({"index": [1, 2], "value": [10.0, 20.0]})
+    _seg_with_features(
+        viewer, np.zeros((10, 10), dtype=np.int32), df, name="cells_01"
+    )
+    widget = ThresholdWidget(viewer)
+    qtbot.addWidget(widget)
+    items = lambda: [
+        widget._target_combo.itemText(i)
+        for i in range(widget._target_combo.count())
+    ]
+    assert items() == ["<single layer>"]
+    set_group(viewer, "exp_1", {ROLE_SEGMENTATION: ["cells_01"]})
+    assert "exp_1" in items()
+    assert "<all groups>" not in items()
+
+
+def test_target_single_member_group_disables_seg_combo(
+    make_napari_viewer, qtbot
+):
+    from segmentation_measurement._groups import ROLE_SEGMENTATION, set_group
+    from segmentation_measurement._threshold_widget import ThresholdWidget
+    viewer = make_napari_viewer()
+    df = pd.DataFrame({"index": [1, 2], "value": [10.0, 20.0]})
+    _seg_with_features(
+        viewer, np.zeros((10, 10), dtype=np.int32), df, name="cells_01"
+    )
+    set_group(viewer, "exp_1", {ROLE_SEGMENTATION: ["cells_01"]})
+    widget = ThresholdWidget(viewer)
+    qtbot.addWidget(widget)
+    widget._target_combo.setCurrentText("exp_1")
+    assert not widget._seg_combo.isEnabled()
+    cols = [
+        widget._col_combo.itemText(i)
+        for i in range(widget._col_combo.count())
+    ]
+    assert "value" in cols
+
+
+def test_multi_member_histogram_uses_concat(make_napari_viewer, qtbot):
+    from segmentation_measurement._groups import ROLE_SEGMENTATION, set_group
+    from segmentation_measurement._threshold_widget import ThresholdWidget
+    viewer = make_napari_viewer()
+    df1 = pd.DataFrame({"index": [1, 2], "value": [10.0, 20.0]})
+    df2 = pd.DataFrame({"index": [1, 2], "value": [30.0, 40.0]})
+    _seg_with_features(
+        viewer, np.zeros((10, 10), dtype=np.int32), df1, name="cells_01"
+    )
+    _seg_with_features(
+        viewer, np.zeros((10, 10), dtype=np.int32), df2, name="cells_02"
+    )
+    set_group(
+        viewer, "exp_1", {ROLE_SEGMENTATION: ["cells_01", "cells_02"]}
+    )
+    widget = ThresholdWidget(viewer)
+    qtbot.addWidget(widget)
+    widget._target_combo.setCurrentText("exp_1")
+    widget._col_combo.setCurrentText("value")
+    feats = widget._current_features_frame()
+    assert feats is not None
+    assert "_source_layer" in feats.columns
+    assert set(feats["_source_layer"].unique()) == {"cells_01", "cells_02"}
+
+
+def test_multi_member_categorize_writes_back_per_layer(
+    make_napari_viewer, qtbot
+):
+    from segmentation_measurement._groups import ROLE_SEGMENTATION, set_group
+    from segmentation_measurement._threshold_widget import ThresholdWidget
+    seg1 = np.zeros((20, 20), dtype=np.int32)
+    seg1[2:8, 2:8] = 1
+    seg1[12:18, 12:18] = 2
+    seg2 = np.zeros((20, 20), dtype=np.int32)
+    seg2[2:8, 2:8] = 1
+    df1 = pd.DataFrame({"index": [1, 2], "value": [10.0, 90.0]})
+    df2 = pd.DataFrame({"index": [1], "value": [55.0]})
+    viewer = make_napari_viewer()
+    layer1 = _seg_with_features(viewer, seg1, df1, name="cells_01")
+    layer2 = _seg_with_features(viewer, seg2, df2, name="cells_02")
+    set_group(
+        viewer, "exp_1", {ROLE_SEGMENTATION: ["cells_01", "cells_02"]}
+    )
+    widget = ThresholdWidget(viewer)
+    qtbot.addWidget(widget)
+    widget._target_combo.setCurrentText("exp_1")
+    widget._n_spin.setValue(2)
+    widget._col_combo.setCurrentText("value")
+    widget._threshold_spins[0].setValue(50.0)
+    widget._out_name.setText("cats")
+    widget._run_categorization()
+    assert "category_id" in layer1.features.columns
+    assert "category_id" in layer2.features.columns
+    layer_names = [layer.name for layer in viewer.layers]
+    assert "cats_cells_01" in layer_names
+    assert "cats_cells_02" in layer_names
+
+
+def test_single_member_group_no_suffix(make_napari_viewer, qtbot):
+    from segmentation_measurement._groups import ROLE_SEGMENTATION, set_group
+    from segmentation_measurement._threshold_widget import ThresholdWidget
+    seg = np.zeros((20, 20), dtype=np.int32)
+    seg[2:8, 2:8] = 1
+    seg[12:18, 12:18] = 2
+    df = pd.DataFrame({"index": [1, 2], "value": [10.0, 90.0]})
+    viewer = make_napari_viewer()
+    _seg_with_features(viewer, seg, df, name="cells_01")
+    set_group(viewer, "exp_1", {ROLE_SEGMENTATION: ["cells_01"]})
+    widget = ThresholdWidget(viewer)
+    qtbot.addWidget(widget)
+    widget._target_combo.setCurrentText("exp_1")
+    widget._n_spin.setValue(2)
+    widget._col_combo.setCurrentText("value")
+    widget._threshold_spins[0].setValue(50.0)
+    widget._out_name.setText("cats")
+    widget._run_categorization()
+    layer_names = [layer.name for layer in viewer.layers]
+    assert "cats" in layer_names
+    assert "cats_cells_01" not in layer_names
+
+
 def test_works_with_morphology_features(make_napari_viewer, qtbot):
     """Threshold widget accepts morphology measurement features on the layer."""
     from segmentation_measurement._threshold_widget import ThresholdWidget

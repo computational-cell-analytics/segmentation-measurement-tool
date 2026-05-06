@@ -8,6 +8,8 @@
 - **Cell-nucleus measurements**: per-cell nucleus count, cell-to-nucleus area/volume ratio, and optional cytoplasmic vs. nuclear intensity ratios from paired cell and nucleus segmentations.
 - **Threshold analysis**: categorize objects into named groups based on any measurement column using automatic or manual thresholds.
 - **Clustering analysis**: cluster objects using k-means, DBSCAN, HDBSCAN, or Mean Shift on any combination of measurement features, with an interactive 2-D feature-reduction scatter plot (UMAP, t-SNE, or PCA).
+- **Classification analysis**: train a random forest or logistic regression classifier from interactive napari brush annotations and apply it to all segments, with optional export of the trained classifier.
+- **Batch processing across multiple segmentations**: define named *groups* of layers in the napari plugin and run any measurement or analysis widget over every member of a group with a single click, with results written back per-layer.
 - **Napari plugin**: interactive widgets for all of the above, with table visualization and export to CSV, TSV, and Excel.
 - **CLI**: command-line interface for all functionality.
 
