@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 
 _CLUSTER_EXCLUDE = frozenset({
-    "index", "cluster_id", "category_id", "category_name",
+    "index", "_source_layer", "cluster_id", "category_id", "category_name",
     "annotation", "classification_id", "classification_name",
 })
 

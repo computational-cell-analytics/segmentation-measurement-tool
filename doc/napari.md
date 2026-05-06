@@ -32,6 +32,8 @@ Open any widget from the napari menu:
 
 **Plugins → Segmentation Measurement → Table Manipulation → Table Manipulation**
 
+**Plugins → Segmentation Measurement → Group Manager → Group Manager**
+
 All widgets appear as dockable panels that can be placed anywhere in the napari window.
 
 ### Working with measurement tables
@@ -45,6 +47,38 @@ loading or editing a table), the dock is opened automatically and the source lay
 is selected so the result is visible immediately.  The dock supports sorting,
 in-place editing, copy/paste, CSV save, and bidirectional row ↔ viewer selection
 sync.
+
+### Working with groups (batch processing)
+
+A **group** is a named bundle of layers that you batch over.  Each group lists
+ordered layers under three roles:
+
+* `segmentation` (required, ≥1 layer) — the primary label layers to process
+* `nucleus_segmentation` (optional) — paired nucleus segmentations for the
+  Cell-Nucleus widget
+* `intensity_image` (optional) — paired intensity images for the Intensity
+  widget and (optionally) the Cell-Nucleus widget
+
+Within a group, layers across roles are paired **by position**:
+`segmentation[i]` is matched with `nucleus_segmentation[i]` and
+`intensity_image[i]`.  An optional role's list must either be empty or have
+exactly the same length as the segmentation list.
+
+Groups are defined in the [Group Manager Widget](#group-manager-widget).
+Once defined, every measurement and analysis widget exposes a **Target**
+combo at the top with two options:
+
+* `<single layer>` (default) — original single-layer behaviour.  Pick one
+  segmentation (and optional pair partners) via the existing combos.
+* a group name — operate on the group's members.  Measurement widgets
+  iterate over members and write results into each member's `features`.
+  Analysis widgets concatenate features across members for joint
+  computation, then split results back to each member's `features` and
+  emit one output label layer per member named `{output}_{layer}` (or
+  just `{output}` for a single-member group).
+
+Renaming a layer that is referenced by a group automatically updates the
+group definition.
 
 ---
 
@@ -140,6 +174,7 @@ layer and a co-registered intensity image.
 
 ```
 ┌─────────────────────────────────┐
+│ Target:          [combo]        │
 │ Segmentation:    [combo]        │
 │ Intensity image: [combo]        │
 │ [Measure intensities]           │
@@ -148,9 +183,20 @@ layer and a co-registered intensity image.
 
 ### Workflow
 
-1. Select a **Segmentation** layer (Labels) from the first dropdown.
-2. Select an **Intensity image** layer (Image) from the second dropdown.
-3. Click **Measure intensities**.
+1. Pick a **Target**: `<single layer>` (default) for the original
+   single-pair behaviour, or a previously defined group name to batch
+   over its members.  In group mode the **Segmentation** and **Intensity
+   image** combos become read-only and show the first member; the group
+   must define a non-empty `intensity_image` role.
+2. Select a **Segmentation** layer (Labels) from the first dropdown.
+3. Select an **Intensity image** layer (Image) from the second dropdown.
+4. Click **Measure intensities**.
+
+In group mode the measurement is run on every
+`(segmentation[i], intensity_image[i])` pair in turn, writing results into
+each segmentation layer's `features`.  See the
+[Working with groups](#working-with-groups-batch-processing) section for
+the broader pattern.
 
 The result is merged into the segmentation layer's `features` table and the napari
 **Features Table** dock is opened automatically with the segmentation layer selected.
@@ -191,6 +237,7 @@ real-world units.
 
 ```
 ┌─────────────────────────────────┐
+│ Target:       [combo]           │
 │ Segmentation: [combo]           │
 │ ┌ Physical pixel/voxel size ─┐ │
 │ │ Y: [spinbox]               │ │
@@ -204,12 +251,17 @@ For 3-D data a third spinbox **Z** is added automatically.
 
 ### Workflow
 
-1. Select a **Segmentation** layer (Labels) from the dropdown.  The scale spinboxes are
+1. Pick a **Target**: `<single layer>` (default) for the original
+   single-layer behaviour, or a previously defined group name to batch
+   over its segmentation members.  In group mode the **Segmentation**
+   combo becomes read-only and shows the first member; the same scale
+   settings apply to every member.
+2. Select a **Segmentation** layer (Labels) from the dropdown.  The scale spinboxes are
    pre-populated from the layer's `scale` attribute if it has been set; otherwise they
    default to `1.0`.
-2. Adjust the per-axis scale values if needed.  For isotropic data a single value applies
+3. Adjust the per-axis scale values if needed.  For isotropic data a single value applies
    to all axes; for anisotropic data set each axis independently.
-3. Click **Measure morphology**.
+4. Click **Measure morphology**.
 
 The result is merged into the segmentation layer's `features` table and the napari
 **Features Table** dock is opened automatically with the segmentation layer selected.
@@ -262,6 +314,7 @@ thresholds applied to any numeric column of the selected layer's `features` tabl
 
 ```
 ┌──────────────────────────────────────┐
+│ Target:       [combo]                │
 │ Segmentation: [combo]                │
 │ ┌ Column histogram ────────────────┐ │
 │ │ Column: [combo]                  │ │
@@ -280,7 +333,7 @@ thresholds applied to any numeric column of the selected layer's `features` tabl
 
 ### Workflow
 
-#### Step 1 – Select the segmentation layer
+#### Step 1 – Select the segmentation layer or group
 
 The widget operates on the `features` table of the selected Labels layer (populated
 by **Intensity Measurement**, **Morphology Measurement**, **Cell-Nucleus
@@ -288,8 +341,15 @@ Measurement**, or by loading a CSV via the [Table Manipulation
 Widget](#table-manipulation-widget)).
 
 1. Run one of the measurement widgets first (or load a CSV).
-2. Pick the layer from the **Segmentation** dropdown.  The **Column** dropdown is
-   filled with its numeric columns (excluding `index`).
+2. Pick a **Target**: `<single layer>` (default) for the original
+   single-layer behaviour, or a previously defined group name.  In group
+   mode the **Segmentation** combo becomes read-only.  The histogram and
+   threshold suggestion are computed on the **concatenation** of all
+   members' `features` so a single set of thresholds can be applied
+   consistently across the batch.
+3. In single-layer mode, pick the layer from the **Segmentation**
+   dropdown.  The **Column** dropdown is filled with its numeric columns
+   (excluding `index` and `category_id`).
 
 #### Step 2 – Explore the histogram
 
@@ -321,6 +381,10 @@ Two things happen:
   category ID as the label value.  Use napari's built-in colormap controls to distinguish
   the categories visually.
 
+In group mode every member's `features` receives the new columns and one
+output Labels layer is created per member named `{output}_{layer_name}`
+(or just `{output}` when the group has a single member).
+
 #### How thresholds are applied
 
 Segments with a value **below** the first threshold are assigned category 1, segments
@@ -340,6 +404,7 @@ statistics.
 
 ```
 ┌─────────────────────────────────────┐
+│ Target:                 [combo]     │
 │ Cell segmentation:      [combo]     │
 │ Nucleus segmentation:   [combo]     │
 │ Intensity image (optional): [combo] │
@@ -355,15 +420,26 @@ For 3-D data a third spinbox **Z** is added automatically.
 
 ### Workflow
 
-1. Select a **Cell segmentation** layer (Labels) from the first dropdown.  The scale
+1. Pick a **Target**: `<single layer>` (default) for the original
+   per-pair behaviour, or a previously defined group name to batch over
+   its members.  In group mode the cell, nucleus, and intensity-image
+   combos become read-only and show the first member; the group must
+   define a non-empty `nucleus_segmentation` role, while
+   `intensity_image` is optional and is used when present.
+2. Select a **Cell segmentation** layer (Labels) from the first dropdown.  The scale
    spinboxes are pre-populated from the layer's `scale` attribute if it has been set;
    otherwise they default to `1.0`.
-2. Select a **Nucleus segmentation** layer (Labels) from the second dropdown.  This layer
+3. Select a **Nucleus segmentation** layer (Labels) from the second dropdown.  This layer
    must have the same spatial dimensions as the cell segmentation.
-3. Optionally select an **Intensity image** layer (Image) from the third dropdown.
+4. Optionally select an **Intensity image** layer (Image) from the third dropdown.
    Choose `(none)` to skip intensity measurements.
-4. Adjust the per-axis scale values if needed (same convention as the Morphology widget).
-5. Click **Measure cell-nucleus**.
+5. Adjust the per-axis scale values if needed (same convention as the Morphology widget).
+6. Click **Measure cell-nucleus**.
+
+In group mode the measurement is run on every
+`(segmentation[i], nucleus_segmentation[i], intensity_image[i] or None)`
+triple in turn, writing results into each cell-segmentation layer's
+`features`.
 
 The result is merged into the **cell** segmentation layer's `features` table and the
 napari **Features Table** dock is opened automatically with that layer selected.
@@ -414,6 +490,7 @@ kept in sync.
 
 ```
 ┌──────────────────────────────────────┐
+│ Target:       [combo]                │
 │ Segmentation: [combo]                │
 │ ┌ Feature reduction ───────────────┐ │
 │ │ Method: [UMAP▾]  [Reduce]        │ │
@@ -430,11 +507,19 @@ kept in sync.
 
 ### Workflow
 
-#### Step 1 – Select the segmentation layer
+#### Step 1 – Select the segmentation layer or group
 
 The widget operates on the `features` table of the selected Labels layer.  Run a
 measurement widget first (or load a CSV via the Table Manipulation widget), then
-pick the layer from the **Segmentation** dropdown.
+either pick the layer from the **Segmentation** dropdown or pick a group
+from the **Target** dropdown.
+
+In group mode the **Segmentation** combo becomes read-only.  Features
+across the group's members are concatenated for joint clustering and the
+2-D feature-reduction scatter plot, and one output Labels layer is
+created per member named `{output}_{layer_name}` (or just `{output}` for
+a single-member group).  The same cluster colours are applied across all
+output layers so cluster IDs match visually.
 
 #### Step 2 – Explore the feature space (optional)
 
@@ -508,6 +593,7 @@ table.  Trained classifiers can be exported to disk and reloaded later.
 
 ```
 ┌──────────────────────────────────────┐
+│ Target: [combo]                      │
 │ ┌ Layers ──────────────────────────┐ │
 │ │ Segmentation: [combo]            │ │
 │ │ Annotation layer: [combo] [Create new] │
@@ -529,13 +615,25 @@ table.  Trained classifiers can be exported to disk and reloaded later.
 
 ### Workflow
 
-#### Step 1 – Select the segmentation layer
+#### Step 1 – Select the segmentation layer or group
 
 The widget operates on the `features` table of the selected Labels layer.  Run a
 measurement widget first (or load a CSV via the Table Manipulation widget), then
-pick the layer from the **Segmentation** dropdown.
+pick a **Target**: `<single layer>` (default) for the original
+single-layer behaviour, or a previously defined group name to classify
+across the group's segmentation members.
+
+In group mode the **Segmentation** combo is restricted to the group's
+members so you can step through them one at a time to annotate each.
+The class-names table pools detected annotation IDs across **every**
+member of the group, so detected classes are not lost as you switch
+members.  See [Per-member annotation persistence](#per-member-annotation-persistence)
+below for how brushstrokes survive member switches.
 
 #### Step 2 – Create an annotation layer
+
+The **Annotation layer** combo defaults to `(none)` so per-member
+persistence cannot accidentally overwrite an unrelated label layer.
 
 1. Click **Create new** next to the **Annotation layer** dropdown.  A new, empty Labels
    layer called `annotations` is added to napari and automatically selected.
@@ -592,11 +690,41 @@ Three things happen:
   (string).  The Features Table dock is opened automatically with that layer
   selected.
 * A new Labels layer is created (or updated) in napari where each segment is painted with
-  its `classification_id`.  Distinct colours are assigned per class using the `tab10`
-  colormap.
+  its `classification_id`.  Colours are keyed off the class ID itself
+  (using `tab10` for ≤10 classes and `tab20` beyond that), so the same
+  class always renders in the same colour even when other classes are
+  absent from a particular layer.
 
 If you re-run **Train & Apply**, existing `classification_id` and `classification_name`
 columns are excluded from the feature set so they do not affect the new result.
+
+In group mode the classifier is trained on the **concatenation** of all
+members' `features` (using each member's projected `annotation` column)
+and then applied per-member.  One output Labels layer is created per
+member named `{output}_{layer_name}` (or just `{output}` for a
+single-member group).  Class colours are keyed off the class ID, so the
+same class always renders in the same colour across all member outputs
+even if a particular member only contains a subset of classes.
+
+#### Per-member annotation persistence
+
+In group mode the widget keeps a per-member cache of your brushstrokes
+so they survive switching between members:
+
+* When you switch the **Segmentation** combo to a different member, the
+  current annotation layer's contents are saved (sparse-compressed) for
+  the previously-active member, and the cached annotations for the new
+  member are loaded into the same annotation layer.  If the new member
+  has no cache yet, the layer is reset to zeros.
+* Switching the **Target** combo back to `<single layer>` (or to another
+  group) saves the current member's annotations first so they are
+  available again when you re-enter the group.
+* The cache is kept only as long as the widget is open and is keyed off
+  the segmentation-layer name; renaming a member-layer mid-session
+  decouples its cache.
+
+The single-layer mode is unaffected: switching segmentation layers there
+does not alter the annotation layer.
 
 #### Classification methods and parameters
 
@@ -631,6 +759,81 @@ above) or used with the `analyze classify` CLI command to apply it to new tables
 Use the **Save as CSV** button in the napari Features Table dock, or the
 **Save table** button in the [Table Manipulation Widget](#table-manipulation-widget)
 for TSV / XLSX output.
+
+---
+
+## Group Manager Widget
+
+The Group Manager is the single place where you define and edit the layer
+**groups** consumed by every measurement and analysis widget's *Target*
+combo.  See [Working with groups](#working-with-groups-batch-processing)
+for the underlying data model and pairing semantics.
+
+### Layout (scrollable)
+
+```
+┌────────────────────────────────────────┐
+│ ┌ Defined groups ────────────────────┐ │
+│ │  exp_1  (3 seg, 3 nuc)             │ │
+│ │  exp_2  (5 seg)                    │ │
+│ │  ...                               │ │
+│ │ [Delete selected]                  │ │
+│ └────────────────────────────────────┘ │
+│ ┌ Group editor ──────────────────────┐ │
+│ │ Name: [edit]                       │ │
+│ │ ┌ Segmentation layers (required)─┐ │ │
+│ │ │  cells_01                      │ │ │
+│ │ │  cells_02                      │ │ │
+│ │ │ [Add selected][Remove][Up][Down] │ │
+│ │ └────────────────────────────────┘ │ │
+│ │ ┌ Nucleus layers (optional)──────┐ │ │
+│ │ │  nuclei_01                     │ │ │
+│ │ │  nuclei_02                     │ │ │
+│ │ │ [Add selected][Remove][Up][Down] │ │
+│ │ └────────────────────────────────┘ │ │
+│ │ ┌ Intensity images (optional)────┐ │ │
+│ │ │  raw_01                        │ │ │
+│ │ │  raw_02                        │ │ │
+│ │ │ [Add selected][Remove][Up][Down] │ │
+│ │ └────────────────────────────────┘ │ │
+│ │ ┌ Pairing preview ───────────────┐ │ │
+│ │ │ Seg       Nucleus   Intensity  │ │ │
+│ │ │ cells_01  nuclei_01 raw_01     │ │ │
+│ │ │ cells_02  nuclei_02 raw_02     │ │ │
+│ │ └────────────────────────────────┘ │ │
+│ │ [Save]                             │ │
+│ └────────────────────────────────────┘ │
+└────────────────────────────────────────┘
+```
+
+### Workflow
+
+1. **Select** layers in napari's main layer list (you can multi-select
+   with Ctrl/Shift).
+2. In the **Segmentation layers** section click **Add selected** to add
+   the selected Labels layers to the role.  Layers are appended in
+   napari layer-panel order; non-Labels layers in the selection are
+   skipped, as are duplicates already in the list.
+3. Optionally repeat for **Nucleus layers** (also Labels-only) and
+   **Intensity images** (Image-only).
+4. Reorder entries with **Up** / **Down** so each row of the
+   **Pairing preview** at the bottom matches the segmentation–nucleus–
+   image triple you actually want.  Within a group, layers across roles
+   are paired by position.
+5. Optional roles must be either empty or have the same length as the
+   segmentation list — saving with mismatched lengths is rejected.
+6. Type a **Name** and click **Save**.  If a group with that name
+   already exists it is replaced.
+
+Selecting a group in the top list loads its current members back into
+the editor for editing.  Click **Delete selected** to remove the
+highlighted group.
+
+Renaming a layer that a group references automatically updates the
+group's stored layer name.  Removing a layer leaves the dangling
+reference in place; running a measurement or analysis widget that
+targets the group will raise an informative error if a member layer is
+missing.
 
 ---
 

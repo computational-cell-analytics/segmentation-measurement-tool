@@ -141,6 +141,62 @@ def test_isotropic_scale_applied_to_area(make_napari_viewer, qtbot):
     assert abs(seg_layer.features.iloc[1]["area"] - 25.0) < 0.1
 
 
+def test_target_combo_lists_groups(make_napari_viewer, qtbot):
+    from segmentation_measurement._groups import ROLE_SEGMENTATION, set_group
+    from segmentation_measurement._morphology_widget import MorphologyWidget
+    viewer = make_napari_viewer()
+    viewer.add_labels(np.zeros((10, 10), dtype=int), name="cells_01")
+    widget = MorphologyWidget(viewer)
+    qtbot.addWidget(widget)
+    items = lambda: [
+        widget._target_combo.itemText(i)
+        for i in range(widget._target_combo.count())
+    ]
+    assert items() == ["<single layer>"]
+    set_group(viewer, "exp_1", {ROLE_SEGMENTATION: ["cells_01"]})
+    assert "exp_1" in items()
+    assert "<all groups>" not in items()
+
+
+def test_target_single_member_group(make_napari_viewer, qtbot):
+    from segmentation_measurement._groups import ROLE_SEGMENTATION, set_group
+    from segmentation_measurement._morphology_widget import MorphologyWidget
+    seg = np.zeros((20, 20), dtype=np.int32)
+    seg[2:8, 2:8] = 1
+    viewer = make_napari_viewer()
+    seg_layer = viewer.add_labels(seg, name="cells_01")
+    set_group(viewer, "exp_1", {ROLE_SEGMENTATION: ["cells_01"]})
+    widget = MorphologyWidget(viewer)
+    qtbot.addWidget(widget)
+    widget._target_combo.setCurrentText("exp_1")
+    assert not widget._seg_combo.isEnabled()
+    widget._run_measurement()
+    feats = seg_layer.features
+    assert "area" in feats.columns
+    assert len(feats.dropna(subset=["area"])) == 1
+
+
+def test_target_multi_member_group_iterates(make_napari_viewer, qtbot):
+    from segmentation_measurement._groups import ROLE_SEGMENTATION, set_group
+    from segmentation_measurement._morphology_widget import MorphologyWidget
+    seg1 = np.zeros((20, 20), dtype=np.int32)
+    seg1[2:8, 2:8] = 1
+    seg2 = np.zeros((20, 20), dtype=np.int32)
+    seg2[3:9, 3:9] = 1
+    viewer = make_napari_viewer()
+    layer1 = viewer.add_labels(seg1, name="cells_01")
+    layer2 = viewer.add_labels(seg2, name="cells_02")
+    set_group(
+        viewer, "exp_1", {ROLE_SEGMENTATION: ["cells_01", "cells_02"]}
+    )
+    widget = MorphologyWidget(viewer)
+    qtbot.addWidget(widget)
+    widget._target_combo.setCurrentText("exp_1")
+    widget._run_measurement()
+    assert "area" in layer1.features.columns
+    assert "area" in layer2.features.columns
+
+
 def test_anisotropic_scale_applied_to_area(make_napari_viewer, qtbot):
     from segmentation_measurement._morphology_widget import MorphologyWidget
     seg = np.zeros((20, 20), dtype=np.int32)
