@@ -20,20 +20,39 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from segmentation_measurement._groups import (
+    ROLE_SEGMENTATION,
+    get_group,
+    list_groups,
+    subscribe,
+)
 from segmentation_measurement._layer_features import (
+    concat_features_for_group,
     merge_features_into_layer,
     show_features_table,
+    split_and_merge_back,
 )
+
+_TARGET_SINGLE = "<single layer>"
 
 
 class ClusteringWidget(QWidget):
     """Widget for clustering segments by their measurement features.
 
-    Operates on the ``features`` table of the selected Labels layer.  After
-    clustering, the resulting ``cluster_id`` column is merged back into the
-    source layer's ``features`` and a new label layer is created that colours
-    each segment by its cluster.  The 2-D feature reduction scatter plot is
-    coloured to match.
+    The *Target* combo selects what to cluster:
+
+    * ``<single layer>`` (default): operate on the ``features`` table of
+      the selected Labels layer.  The ``cluster_id`` column is merged
+      back into that layer's features and a new label layer is created
+      that colours each segment by its cluster.
+    * a group name: concatenate features across the group's segmentation
+      list, run clustering jointly, split results back to each member's
+      ``features``, and create one output label layer per member named
+      ``{output}_{layer_name}`` (or just ``{output}`` if the group has a
+      single member).
+
+    The 2-D feature reduction scatter plot is computed on the same
+    feature frame used for clustering.
     """
 
     def __init__(self, napari_viewer: napari.Viewer) -> None:
@@ -42,13 +61,16 @@ class ClusteringWidget(QWidget):
         self._embedding: np.ndarray | None = None
         self._cluster_ids: np.ndarray | None = None
         self._cluster_colors: dict[int, tuple] = {}
-        self._last_seg_name: str = ""
+        self._last_target_state: tuple = ()
         self._fig = None
         self._ax = None
         self._canvas = None
         self._setup_ui()
         self._viewer.layers.events.inserted.connect(self._update_seg_combo)
         self._viewer.layers.events.removed.connect(self._update_seg_combo)
+        self._unsubscribe = subscribe(self._viewer, self._update_target_combo)
+        self.destroyed.connect(lambda *_: self._unsubscribe())
+        self._update_target_combo()
         self._update_seg_combo()
 
     def _setup_ui(self) -> None:
@@ -63,6 +85,13 @@ class ClusteringWidget(QWidget):
         scroll.setWidget(inner)
         layout = QVBoxLayout()
         inner.setLayout(layout)
+
+        target_layout = QHBoxLayout()
+        target_layout.addWidget(QLabel("Target:"))
+        self._target_combo = QComboBox()
+        self._target_combo.currentTextChanged.connect(self._on_target_changed)
+        target_layout.addWidget(self._target_combo)
+        layout.addLayout(target_layout)
 
         seg_layout = QHBoxLayout()
         seg_layout.addWidget(QLabel("Segmentation:"))
@@ -213,12 +242,14 @@ class ClusteringWidget(QWidget):
         self._embedding = None
 
     def _on_seg_selected(self, name: str) -> None:
-        # Ignore spurious events caused by combo repopulation in
-        # _update_seg_combo (it briefly clears the combo).  Only reset state
-        # when the user actually picks a different layer.
-        if not name or name == self._last_seg_name:
+        # When the user picks a different single layer, drop the cached
+        # embedding and cluster IDs since they applied to the previous one.
+        if self._target_combo.currentText() != _TARGET_SINGLE:
             return
-        self._last_seg_name = name
+        new_state = (_TARGET_SINGLE, name)
+        if new_state == self._last_target_state:
+            return
+        self._last_target_state = new_state
         self._embedding = None
         self._cluster_ids = None
         self._cluster_colors = {}
@@ -236,16 +267,66 @@ class ClusteringWidget(QWidget):
         if current in label_layers:
             self._seg_combo.setCurrentText(current)
         self._seg_combo.blockSignals(False)
+        self._on_target_changed(self._target_combo.currentText())
+
+    def _update_target_combo(self) -> None:
+        groups = list_groups(self._viewer)
+        current = self._target_combo.currentText()
+        self._target_combo.blockSignals(True)
+        self._target_combo.clear()
+        self._target_combo.addItem(_TARGET_SINGLE)
+        self._target_combo.addItems(groups)
+        items = [
+            self._target_combo.itemText(i)
+            for i in range(self._target_combo.count())
+        ]
+        if current in items:
+            self._target_combo.setCurrentText(current)
+        else:
+            self._target_combo.setCurrentText(_TARGET_SINGLE)
+        self._target_combo.blockSignals(False)
+        self._on_target_changed(self._target_combo.currentText())
+
+    def _on_target_changed(self, target: str) -> None:
+        is_group = target != _TARGET_SINGLE
+        self._seg_combo.setEnabled(not is_group)
+        if is_group:
+            try:
+                members = get_group(self._viewer, target)
+            except KeyError:
+                members = {}
+            seg_layers = members.get(ROLE_SEGMENTATION, [])
+            if seg_layers and seg_layers[0] in self._viewer.layers:
+                self._seg_combo.blockSignals(True)
+                self._seg_combo.setCurrentText(seg_layers[0])
+                self._seg_combo.blockSignals(False)
+        # Reset cached embedding/clusters when the target changes.
+        new_state = (target, self._seg_combo.currentText())
+        if new_state == self._last_target_state:
+            return
+        self._last_target_state = new_state
+        self._embedding = None
+        self._cluster_ids = None
+        self._cluster_colors = {}
+        self._update_scatter()
 
     def _current_features(self) -> pd.DataFrame | None:
-        seg_name = self._seg_combo.currentText()
-        if not seg_name or seg_name not in [l.name for l in self._viewer.layers]:
+        target = self._target_combo.currentText()
+        if target == _TARGET_SINGLE:
+            seg_name = self._seg_combo.currentText()
+            if not seg_name or seg_name not in [l.name for l in self._viewer.layers]:
+                return None
+            layer = self._viewer.layers[seg_name]
+            feats = getattr(layer, "features", None)
+            if feats is None or len(feats.columns) == 0:
+                return None
+            return feats
+        try:
+            return concat_features_for_group(
+                self._viewer, target, ROLE_SEGMENTATION
+            )
+        except (ValueError, KeyError):
             return None
-        layer = self._viewer.layers[seg_name]
-        feats = getattr(layer, "features", None)
-        if feats is None or len(feats.columns) == 0:
-            return None
-        return feats
 
     # --- Embedding ---
 
@@ -358,10 +439,7 @@ class ClusteringWidget(QWidget):
 
     def _run_clustering(self) -> None:
         from segmentation_measurement.analysis import cluster_measurements
-        seg_name = self._seg_combo.currentText()
-        if not seg_name:
-            return
-        seg_layer = self._viewer.layers[seg_name]
+        target = self._target_combo.currentText()
         feats = self._current_features()
         if feats is None:
             return
@@ -376,16 +454,63 @@ class ClusteringWidget(QWidget):
         clustered = cluster_measurements(
             feats, method=method, **self._get_method_kwargs()
         )
-        merge_features_into_layer(
-            seg_layer, clustered[["index", "cluster_id"]]
-        )
         self._cluster_ids = clustered["cluster_id"].values.copy()
 
-        if self._embedding is None:
+        # The cached embedding can be stale if a previous run wrote new
+        # rows back into ``layer.features`` (the padded background row
+        # added by merge_features_into_layer changes the row count).
+        if (
+            self._embedding is None
+            or len(self._embedding) != len(feats)
+        ):
             self._embedding = self._compute_embedding()
         self._update_scatter(self._cluster_ids)
 
-        segmentation = seg_layer.data
+        out_name = self._out_name.text() or "clusters"
+
+        if target == _TARGET_SINGLE:
+            seg_name = self._seg_combo.currentText()
+            seg_layer = self._viewer.layers[seg_name]
+            merge_features_into_layer(
+                seg_layer, clustered[["index", "cluster_id"]]
+            )
+            self._build_label_layer(seg_layer, clustered, out_name)
+            show_features_table(self._viewer, seg_layer)
+            return
+
+        # Group target.
+        try:
+            members = get_group(self._viewer, target)
+        except KeyError:
+            return
+        seg_layers = members.get(ROLE_SEGMENTATION, [])
+        if not seg_layers:
+            return
+        split_and_merge_back(self._viewer, clustered, ["cluster_id"])
+
+        suffix_per_member = len(seg_layers) > 1
+        first_layer = None
+        for seg_name in seg_layers:
+            if seg_name not in self._viewer.layers:
+                continue
+            seg_layer = self._viewer.layers[seg_name]
+            sub = clustered[clustered["_source_layer"] == seg_name]
+            layer_out_name = (
+                f"{out_name}_{seg_name}" if suffix_per_member else out_name
+            )
+            self._build_label_layer(seg_layer, sub, layer_out_name)
+            if first_layer is None:
+                first_layer = seg_layer
+        if first_layer is not None:
+            show_features_table(self._viewer, first_layer)
+
+    def _build_label_layer(
+        self,
+        source_layer: object,
+        clustered: pd.DataFrame,
+        out_name: str,
+    ) -> None:
+        segmentation = source_layer.data
         result = np.zeros_like(segmentation)
         for label_id, cluster_id in zip(
             clustered["index"].values,
@@ -393,17 +518,13 @@ class ClusteringWidget(QWidget):
         ):
             if int(cluster_id) > 0:
                 result[segmentation == int(label_id)] = int(cluster_id)
-
-        out_name = self._out_name.text() or "clusters"
         existing = [layer.name for layer in self._viewer.layers]
         if out_name in existing:
             layer = self._viewer.layers[out_name]
             layer.data = result
         else:
             layer = self._viewer.add_labels(result, name=out_name)
-
         _apply_cluster_colors(layer, self._cluster_colors)
-        show_features_table(self._viewer, seg_layer)
 
 
 def _get_cluster_colors(n: int) -> list[tuple]:

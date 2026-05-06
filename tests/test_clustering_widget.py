@@ -169,6 +169,65 @@ def test_cluster_updates_existing_layer(make_napari_viewer, qtbot):
     assert len(viewer.layers) == n_layers
 
 
+def test_target_combo_lists_groups(make_napari_viewer, qtbot):
+    from segmentation_measurement._clustering_widget import ClusteringWidget
+    from segmentation_measurement._groups import ROLE_SEGMENTATION, set_group
+    viewer = make_napari_viewer()
+    _make_seg_with_features(viewer, n=10, name="cells_01")
+    widget = ClusteringWidget(viewer)
+    qtbot.addWidget(widget)
+    items = lambda: [
+        widget._target_combo.itemText(i)
+        for i in range(widget._target_combo.count())
+    ]
+    assert items() == ["<single layer>"]
+    set_group(viewer, "exp_1", {ROLE_SEGMENTATION: ["cells_01"]})
+    assert "exp_1" in items()
+
+
+@_CI_XFAIL
+def test_group_mode_concat_features(make_napari_viewer, qtbot):
+    from segmentation_measurement._clustering_widget import ClusteringWidget
+    from segmentation_measurement._groups import ROLE_SEGMENTATION, set_group
+    viewer = make_napari_viewer()
+    _make_seg_with_features(viewer, n=20, name="cells_01")
+    _make_seg_with_features(viewer, n=20, name="cells_02")
+    set_group(
+        viewer, "exp_1", {ROLE_SEGMENTATION: ["cells_01", "cells_02"]}
+    )
+    widget = ClusteringWidget(viewer)
+    qtbot.addWidget(widget)
+    widget._target_combo.setCurrentText("exp_1")
+    feats = widget._current_features()
+    assert feats is not None
+    assert "_source_layer" in feats.columns
+    assert set(feats["_source_layer"].unique()) == {"cells_01", "cells_02"}
+
+
+@_CI_XFAIL
+def test_group_mode_writes_back_per_layer(make_napari_viewer, qtbot):
+    from segmentation_measurement._clustering_widget import ClusteringWidget
+    from segmentation_measurement._groups import ROLE_SEGMENTATION, set_group
+    viewer = make_napari_viewer()
+    layer1 = _make_seg_with_features(viewer, n=20, name="cells_01")
+    layer2 = _make_seg_with_features(viewer, n=20, name="cells_02")
+    set_group(
+        viewer, "exp_1", {ROLE_SEGMENTATION: ["cells_01", "cells_02"]}
+    )
+    widget = ClusteringWidget(viewer)
+    qtbot.addWidget(widget)
+    widget._target_combo.setCurrentText("exp_1")
+    widget._method_combo.setCurrentText("K-Means")
+    widget._kmeans_n_spin.setValue(2)
+    widget._out_name.setText("clust")
+    widget._run_clustering()
+    assert "cluster_id" in layer1.features.columns
+    assert "cluster_id" in layer2.features.columns
+    layer_names = [layer.name for layer in viewer.layers]
+    assert "clust_cells_01" in layer_names
+    assert "clust_cells_02" in layer_names
+
+
 def test_works_with_morphology_features(make_napari_viewer, qtbot):
     from segmentation_measurement._clustering_widget import ClusteringWidget
     df = pd.DataFrame({

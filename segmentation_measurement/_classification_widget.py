@@ -24,33 +24,67 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from segmentation_measurement._groups import (
+    ROLE_SEGMENTATION,
+    get_group,
+    list_groups,
+    subscribe,
+)
 from segmentation_measurement._layer_features import (
+    concat_features_for_group,
     merge_features_into_layer,
     show_features_table,
+    split_and_merge_back,
 )
+
+_TARGET_SINGLE = "<single layer>"
+_NONE_ANN = "(none)"
 
 
 class ClassificationWidget(QWidget):
     """Widget for interactive classification of segments by measurement features.
 
-    Operates on the ``features`` table of the selected Labels layer.  Users
-    paint brushstroke annotations on a dedicated annotation layer.  Clicking
-    *Project annotations* maps per-pixel annotations to per-segment labels
-    via majority vote and merges them into the source layer's ``features``
-    under an ``annotation`` column.  Training uses the annotated rows to fit
-    a logistic regression or random forest classifier; *Apply* writes
-    ``classification_id`` and ``classification_name`` columns back into the
-    source layer's ``features`` and creates a new label layer for
-    visualisation.  Trained classifiers can be exported and reloaded.
+    Operates on the ``features`` table of the selected Labels layer.
+    Users paint brushstroke annotations on a dedicated annotation layer.
+    Clicking *Project annotations* maps per-pixel annotations to
+    per-segment labels via majority vote and merges them into the source
+    layer's ``features`` under an ``annotation`` column.  Training uses
+    the annotated rows to fit a logistic regression or random forest
+    classifier; *Apply* writes ``classification_id`` and
+    ``classification_name`` columns back into the source layer's
+    ``features`` and creates a new label layer for visualisation.
+    Trained classifiers can be exported and reloaded.
+
+    The *Target* combo selects what to classify:
+
+    * ``<single layer>`` (default): operate on the layer chosen in the
+      *Segmentation* combo.  Original behaviour.
+    * a group name: the *Segmentation* combo is restricted to the
+      group's segmentation members so the user can step through them
+      (annotating each one in turn and projecting before training).
+      *Train & Apply* concatenates all members' features for training
+      and then applies the classifier to each member individually,
+      creating one output label layer per member named
+      ``{output}_{layer_name}`` (or just ``{output}`` if the group has
+      a single member).
     """
 
     def __init__(self, napari_viewer: napari.Viewer) -> None:
         super().__init__()
         self._viewer = napari_viewer
         self._classifier = None
+        # Per-member annotation cache (group mode only). Keys are
+        # segmentation layer names; values are sparse-compressed
+        # annotation arrays produced by ``_compress_annotation``.
+        self._member_annotations: dict[str, dict] = {}
+        self._current_member: str | None = None
         self._setup_ui()
+        self._seg_combo.currentTextChanged.connect(self._on_seg_combo_changed)
         self._viewer.layers.events.inserted.connect(self._update_layer_combos)
         self._viewer.layers.events.removed.connect(self._update_layer_combos)
+        self._unsubscribe = subscribe(self._viewer, self._update_target_combo)
+        self.destroyed.connect(lambda *_: self._unsubscribe())
+        self._update_target_combo()
         self._update_layer_combos()
 
     # ------------------------------------------------------------------ UI ---
@@ -67,6 +101,13 @@ class ClassificationWidget(QWidget):
         scroll.setWidget(inner)
         layout = QVBoxLayout()
         inner.setLayout(layout)
+
+        target_layout = QHBoxLayout()
+        target_layout.addWidget(QLabel("Target:"))
+        self._target_combo = QComboBox()
+        self._target_combo.currentTextChanged.connect(self._on_target_changed)
+        target_layout.addWidget(self._target_combo)
+        layout.addLayout(target_layout)
 
         layout.addWidget(self._build_layers_group())
         layout.addWidget(self._build_class_names_group())
@@ -209,17 +250,117 @@ class ClassificationWidget(QWidget):
     def _on_method_changed(self, index: int) -> None:
         self._params_stack.setCurrentIndex(index)
 
+    def _update_target_combo(self) -> None:
+        groups = list_groups(self._viewer)
+        current = self._target_combo.currentText()
+        self._target_combo.blockSignals(True)
+        self._target_combo.clear()
+        self._target_combo.addItem(_TARGET_SINGLE)
+        self._target_combo.addItems(groups)
+        items = [
+            self._target_combo.itemText(i)
+            for i in range(self._target_combo.count())
+        ]
+        if current in items:
+            self._target_combo.setCurrentText(current)
+        else:
+            self._target_combo.setCurrentText(_TARGET_SINGLE)
+        self._target_combo.blockSignals(False)
+        self._update_layer_combos()
+
+    def _on_target_changed(self, target: str) -> None:
+        # Save the previously-active group member's annotations before the
+        # selection changes underneath us.
+        if self._current_member is not None:
+            self._save_member_annotations(self._current_member)
+        self._update_layer_combos()
+        if target == _TARGET_SINGLE:
+            self._current_member = None
+            return
+        # Group mode: load the first member's cached annotations into the
+        # currently-selected annotation layer (zeroing it if no cache exists).
+        new_member = self._seg_combo.currentText() or None
+        if new_member is not None:
+            self._load_member_annotations(new_member)
+        self._current_member = new_member
+
+    def _on_seg_combo_changed(self, name: str) -> None:
+        # Member-switch persistence applies only in group mode.
+        if self._target_combo.currentText() == _TARGET_SINGLE:
+            self._current_member = None
+            return
+        if not name or name == self._current_member:
+            return
+        if self._current_member is not None:
+            self._save_member_annotations(self._current_member)
+        self._load_member_annotations(name)
+        self._current_member = name
+
+    def _save_member_annotations(self, member_name: str) -> None:
+        """Snapshot the current annotation layer's data for ``member_name``."""
+        ann = self._ann_layer()
+        if ann is None:
+            return
+        self._member_annotations[member_name] = _compress_annotation(ann.data)
+
+    def _load_member_annotations(self, member_name: str) -> None:
+        """Restore (or zero) the annotation layer for ``member_name``."""
+        ann = self._ann_layer()
+        if ann is None or member_name not in self._viewer.layers:
+            return
+        seg = self._viewer.layers[member_name]
+        cached = self._member_annotations.get(member_name)
+        if cached is not None and cached["shape"] == tuple(seg.data.shape):
+            ann.data = _decompress_annotation(cached)
+        else:
+            ann.data = np.zeros(seg.data.shape, dtype=np.int32)
+
+    def _ann_layer(self) -> object | None:
+        ann_name = self._ann_combo.currentText()
+        if (
+            not ann_name
+            or ann_name == _NONE_ANN
+            or ann_name not in [l.name for l in self._viewer.layers]
+        ):
+            return None
+        return self._viewer.layers[ann_name]
+
     def _update_layer_combos(self, event: object = None) -> None:
         from napari.layers import Labels
-        label_names = [
+        all_label_names = [
             layer.name for layer in self._viewer.layers if isinstance(layer, Labels)
         ]
-        for combo in (self._seg_combo, self._ann_combo):
-            current = combo.currentText()
-            combo.clear()
-            combo.addItems(label_names)
-            if current in label_names:
-                combo.setCurrentText(current)
+        target = self._target_combo.currentText()
+        if target == _TARGET_SINGLE:
+            seg_items = all_label_names
+        else:
+            try:
+                members = get_group(self._viewer, target)
+            except KeyError:
+                seg_items = all_label_names
+            else:
+                seg_items = list(members.get(ROLE_SEGMENTATION, []))
+        current_seg = self._seg_combo.currentText()
+        self._seg_combo.blockSignals(True)
+        self._seg_combo.clear()
+        self._seg_combo.addItems(seg_items)
+        if current_seg in seg_items:
+            self._seg_combo.setCurrentText(current_seg)
+        elif seg_items:
+            self._seg_combo.setCurrentText(seg_items[0])
+        self._seg_combo.blockSignals(False)
+
+        current_ann = self._ann_combo.currentText()
+        self._ann_combo.blockSignals(True)
+        self._ann_combo.clear()
+        # Sentinel keeps annotation selection explicit: per-member
+        # persistence must not auto-clear an arbitrary label layer that
+        # happened to be first in the viewer (typically a segmentation).
+        self._ann_combo.addItem(_NONE_ANN)
+        self._ann_combo.addItems(all_label_names)
+        if current_ann == _NONE_ANN or current_ann in all_label_names:
+            self._ann_combo.setCurrentText(current_ann)
+        self._ann_combo.blockSignals(False)
 
     def _seg_layer(self) -> object | None:
         seg_name = self._seg_combo.currentText()
@@ -228,6 +369,7 @@ class ClassificationWidget(QWidget):
         return self._viewer.layers[seg_name]
 
     def _current_features(self) -> pd.DataFrame | None:
+        """Features of the currently-selected segmentation layer (member)."""
         seg = self._seg_layer()
         if seg is None:
             return None
@@ -235,6 +377,24 @@ class ClassificationWidget(QWidget):
         if feats is None or len(feats.columns) == 0:
             return None
         return feats
+
+    def _features_for_classifier(self) -> pd.DataFrame | None:
+        """Features used for training/applying the classifier.
+
+        In single-layer mode this returns the current segmentation
+        layer's features.  In group mode it returns the concatenation
+        across the group's segmentation members (with ``_source_layer``
+        column).
+        """
+        target = self._target_combo.currentText()
+        if target == _TARGET_SINGLE:
+            return self._current_features()
+        try:
+            return concat_features_for_group(
+                self._viewer, target, ROLE_SEGMENTATION
+            )
+        except (ValueError, KeyError):
+            return None
 
     # ---------------------------------------------------------- Annotation ---
 
@@ -254,7 +414,7 @@ class ClassificationWidget(QWidget):
         if feats is None:
             return
         ann_name = self._ann_combo.currentText()
-        if not ann_name or ann_name == seg.name:
+        if not ann_name or ann_name == _NONE_ANN or ann_name == seg.name:
             return
         ann_data = self._viewer.layers[ann_name].data
         if seg.data.shape != ann_data.shape:
@@ -271,9 +431,42 @@ class ClassificationWidget(QWidget):
         })
         merge_features_into_layer(seg, ann_df)
 
-        detected_ids = sorted(set(a for a in annotations if a > 0))
-        self._update_class_names_table(detected_ids)
+        self._update_class_names_table(self._collect_annotation_ids())
         show_features_table(self._viewer, seg)
+
+    def _collect_annotation_ids(self) -> list[int]:
+        """Return all unique non-zero annotation IDs across the target.
+
+        In single-layer mode this is the IDs in the current layer's
+        ``annotation`` column.  In group mode it pools IDs across every
+        member that has been annotated already.  NaN rows (the
+        background-padding entries added by ``merge_features_into_layer``)
+        are skipped.
+        """
+        ids: set[int] = set()
+        frames: list[pd.DataFrame] = []
+        target = self._target_combo.currentText()
+        if target == _TARGET_SINGLE:
+            feats = self._current_features()
+            if feats is not None:
+                frames.append(feats)
+        else:
+            try:
+                members = get_group(self._viewer, target)
+            except KeyError:
+                return []
+            for layer_name in members.get(ROLE_SEGMENTATION, []):
+                if layer_name not in self._viewer.layers:
+                    continue
+                feats = getattr(self._viewer.layers[layer_name], "features", None)
+                if feats is not None:
+                    frames.append(feats)
+        for feats in frames:
+            if "annotation" not in feats.columns:
+                continue
+            values = feats["annotation"].dropna()
+            ids.update(int(a) for a in values if int(a) > 0)
+        return sorted(ids)
 
     def _update_class_names_table(self, annotation_ids: list[int]) -> None:
         existing = self._get_class_names()
@@ -314,7 +507,7 @@ class ClassificationWidget(QWidget):
 
     def _train_and_apply(self) -> None:
         from segmentation_measurement.analysis import train_classifier
-        feats = self._current_features()
+        feats = self._features_for_classifier()
         if feats is None or "annotation" not in feats.columns:
             return
         method, kwargs = self._get_method_and_kwargs()
@@ -326,9 +519,11 @@ class ClassificationWidget(QWidget):
 
     def _apply_classifier_only(self) -> None:
         from segmentation_measurement.analysis import apply_classifier
-        seg = self._seg_layer()
-        feats = self._current_features()
-        if seg is None or feats is None or self._classifier is None:
+        if self._classifier is None:
+            return
+        target = self._target_combo.currentText()
+        feats = self._features_for_classifier()
+        if feats is None:
             return
         class_names_dict = self._get_class_names()
         classes = sorted(int(c) for c in self._classifier.classes_)
@@ -336,18 +531,63 @@ class ClassificationWidget(QWidget):
         result = apply_classifier(
             feats, self._classifier, class_names=class_names_list
         )
-        merge_features_into_layer(
-            seg,
-            result[["index", "classification_id", "classification_name"]],
-        )
-        self._create_output_layer(result)
-        show_features_table(self._viewer, seg)
 
-    def _create_output_layer(self, result: pd.DataFrame) -> None:
-        seg = self._seg_layer()
-        if seg is None:
+        # Maximum class across the whole result drives the colormap choice
+        # so per-member output layers share the same color → class mapping
+        # even if a particular member only contains a subset of classes.
+        max_class = int(result["classification_id"].max()) if len(result) else 0
+
+        out_name = self._out_name.text() or "classification"
+
+        if target == _TARGET_SINGLE:
+            seg = self._seg_layer()
+            if seg is None:
+                return
+            merge_features_into_layer(
+                seg,
+                result[["index", "classification_id", "classification_name"]],
+            )
+            self._create_output_layer(seg, result, out_name, max_class)
+            show_features_table(self._viewer, seg)
             return
-        seg_data = seg.data
+
+        # Group target.
+        try:
+            members = get_group(self._viewer, target)
+        except KeyError:
+            return
+        seg_layers = members.get(ROLE_SEGMENTATION, [])
+        if not seg_layers:
+            return
+        split_and_merge_back(
+            self._viewer, result,
+            ["classification_id", "classification_name"],
+        )
+
+        suffix_per_member = len(seg_layers) > 1
+        first_layer = None
+        for seg_name in seg_layers:
+            if seg_name not in self._viewer.layers:
+                continue
+            seg_layer = self._viewer.layers[seg_name]
+            sub = result[result["_source_layer"] == seg_name]
+            layer_out_name = (
+                f"{out_name}_{seg_name}" if suffix_per_member else out_name
+            )
+            self._create_output_layer(seg_layer, sub, layer_out_name, max_class)
+            if first_layer is None:
+                first_layer = seg_layer
+        if first_layer is not None:
+            show_features_table(self._viewer, first_layer)
+
+    def _create_output_layer(
+        self,
+        seg_layer: object,
+        result: pd.DataFrame,
+        out_name: str,
+        max_class: int | None = None,
+    ) -> None:
+        seg_data = seg_layer.data
         out = np.zeros_like(seg_data, dtype=np.int32)
         for lbl, cid in zip(
             result["index"].values,
@@ -356,7 +596,6 @@ class ClassificationWidget(QWidget):
             if int(cid) > 0:
                 out[seg_data == int(lbl)] = int(cid)
 
-        out_name = self._out_name.text() or "classification"
         existing = [layer.name for layer in self._viewer.layers]
         if out_name in existing:
             layer = self._viewer.layers[out_name]
@@ -367,7 +606,7 @@ class ClassificationWidget(QWidget):
         unique_cids = sorted(
             int(c) for c in result["classification_id"].unique() if int(c) > 0
         )
-        _apply_class_colors(layer, unique_cids)
+        _apply_class_colors(layer, unique_cids, max_class)
 
     def _export_classifier(self) -> None:
         if self._classifier is None:
@@ -429,27 +668,93 @@ def _project_annotations_to_segments(
     return result
 
 
-def _apply_class_colors(layer: object, class_ids: list[int]) -> None:
-    """Apply distinct colours to a classification label layer.
+def _compress_annotation(arr: np.ndarray) -> dict:
+    """Compress a sparse integer annotation array to a coordinate-list form.
 
-    Uses ``DirectLabelColormap`` (napari >= 0.5).  Silently skips if the API
-    is unavailable or no class IDs are provided.
+    Annotation arrays are typically very sparse (background = 0 with a
+    few brushstrokes), so storing the shape, the non-zero indices, and
+    the corresponding values is much more compact than the dense array.
+
+    Args:
+        arr: Integer annotation array.  Will be coerced via
+            :func:`numpy.asarray`.
+
+    Returns:
+        dict: Keys ``shape`` (tuple), ``dtype`` (numpy dtype), ``indices``
+            (tuple of ndim 1-D int64 arrays as returned by
+            :func:`numpy.nonzero`), ``values`` (1-D array of non-zero
+            entries).  Pass to :func:`_decompress_annotation` to round-trip.
+    """
+    arr = np.asarray(arr)
+    indices = np.nonzero(arr)
+    return {
+        "shape": tuple(arr.shape),
+        "dtype": arr.dtype,
+        "indices": tuple(np.asarray(c, dtype=np.int64) for c in indices),
+        "values": np.asarray(arr[indices], dtype=arr.dtype),
+    }
+
+
+def _decompress_annotation(compressed: dict) -> np.ndarray:
+    """Reconstruct the dense annotation array from a compressed dict."""
+    arr = np.zeros(compressed["shape"], dtype=compressed["dtype"])
+    if len(compressed["values"]) > 0:
+        arr[compressed["indices"]] = compressed["values"]
+    return arr
+
+
+def _class_color_dict(
+    class_ids: list[int], max_class: int | None = None
+) -> dict[int, tuple]:
+    """Return a deterministic ``{class_id: rgba}`` mapping.
+
+    Colours are keyed off the class ID itself (1-based), so the same
+    class always gets the same colour regardless of which other classes
+    happen to be present in any particular layer.  ``max_class`` (the
+    largest class ID across the *whole* classification) drives the
+    colormap choice so consumers can keep the assignment consistent
+    across multiple per-member output layers.
+
+    Args:
+        class_ids: 1-based class IDs to colour.  Empty input yields an
+            empty mapping.
+        max_class: Largest class ID across the full classification.
+            Defaults to ``max(class_ids)`` when omitted.
+
+    Returns:
+        dict[int, tuple]: ``{class_id: rgba}`` with RGBA tuples from
+            either the ``tab10`` or ``tab20`` matplotlib colormap.
+    """
+    if not class_ids:
+        return {}
+    n = max_class if max_class is not None else max(class_ids)
+    try:
+        import matplotlib
+        cmap = matplotlib.colormaps["tab10" if n <= 10 else "tab20"]
+    except AttributeError:
+        import matplotlib.pyplot as plt
+        cmap = plt.cm.get_cmap("tab10" if n <= 10 else "tab20")
+    return {cid: tuple(cmap((cid - 1) % cmap.N)) for cid in class_ids}
+
+
+def _apply_class_colors(
+    layer: object,
+    class_ids: list[int],
+    max_class: int | None = None,
+) -> None:
+    """Apply deterministic per-ID colours to a classification label layer.
+
+    Uses ``DirectLabelColormap`` (napari >= 0.5).  Silently skips if the
+    API is unavailable or no class IDs are provided.
     """
     if not class_ids:
         return
     try:
         from napari.utils.colormaps import DirectLabelColormap
-        try:
-            import matplotlib
-            n = len(class_ids)
-            cmap = matplotlib.colormaps["tab10" if n <= 10 else "tab20"]
-        except AttributeError:
-            import matplotlib.pyplot as plt
-            n = len(class_ids)
-            cmap = plt.cm.get_cmap("tab10" if n <= 10 else "tab20")
+        colors = _class_color_dict(class_ids, max_class)
         color_dict: dict = {None: np.zeros(4)}
-        for i, cid in enumerate(sorted(class_ids)):
-            color_dict[cid] = np.array(cmap(i % cmap.N), dtype=float)
+        for cid, rgba in colors.items():
+            color_dict[cid] = np.array(rgba, dtype=float)
         layer.colormap = DirectLabelColormap(color_dict=color_dict)
     except Exception:
         pass

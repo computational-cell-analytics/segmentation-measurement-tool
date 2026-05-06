@@ -295,3 +295,265 @@ def test_project_annotations_3d():
     ann[1:3, 1:3, 1:3] = 2
     result = _project_annotations_to_segments(seg, ann)
     assert result[1] == 2
+
+
+def test_target_combo_lists_groups(make_napari_viewer, qtbot):
+    from segmentation_measurement._classification_widget import ClassificationWidget
+    from segmentation_measurement._groups import ROLE_SEGMENTATION, set_group
+    viewer = make_napari_viewer()
+    _make_seg_with_features(viewer, n=20, name="cells_01")
+    widget = ClassificationWidget(viewer)
+    qtbot.addWidget(widget)
+    items = lambda: [
+        widget._target_combo.itemText(i)
+        for i in range(widget._target_combo.count())
+    ]
+    assert items() == ["<single layer>"]
+    set_group(viewer, "exp_1", {ROLE_SEGMENTATION: ["cells_01"]})
+    assert "exp_1" in items()
+
+
+def test_group_mode_seg_combo_restricted_to_members(make_napari_viewer, qtbot):
+    from segmentation_measurement._classification_widget import ClassificationWidget
+    from segmentation_measurement._groups import ROLE_SEGMENTATION, set_group
+    viewer = make_napari_viewer()
+    _make_seg_with_features(viewer, n=20, name="cells_01")
+    _make_seg_with_features(viewer, n=20, name="cells_02")
+    _make_seg_with_features(viewer, n=20, name="other")
+    set_group(
+        viewer, "exp_1", {ROLE_SEGMENTATION: ["cells_01", "cells_02"]}
+    )
+    widget = ClassificationWidget(viewer)
+    qtbot.addWidget(widget)
+    widget._target_combo.setCurrentText("exp_1")
+    seg_items = [
+        widget._seg_combo.itemText(i)
+        for i in range(widget._seg_combo.count())
+    ]
+    assert seg_items == ["cells_01", "cells_02"]
+
+
+@_CI_XFAIL
+def test_group_mode_train_and_apply(make_napari_viewer, qtbot):
+    from segmentation_measurement._classification_widget import ClassificationWidget
+    from segmentation_measurement._groups import ROLE_SEGMENTATION, set_group
+    viewer = make_napari_viewer()
+    layer1 = _make_seg_with_features(viewer, n=20, name="cells_01")
+    layer2 = _make_seg_with_features(viewer, n=20, name="cells_02")
+    set_group(
+        viewer, "exp_1", {ROLE_SEGMENTATION: ["cells_01", "cells_02"]}
+    )
+    widget = ClassificationWidget(viewer)
+    qtbot.addWidget(widget)
+    widget._target_combo.setCurrentText("exp_1")
+    widget._method_combo.setCurrentText("Random Forest")
+    widget._update_class_names_table([1, 2])
+    widget._out_name.setText("cls")
+    widget._train_and_apply()
+    assert "classification_id" in layer1.features.columns
+    assert "classification_id" in layer2.features.columns
+    layer_names = [layer.name for layer in viewer.layers]
+    assert "cls_cells_01" in layer_names
+    assert "cls_cells_02" in layer_names
+
+
+def test_class_color_dict_deterministic_per_id():
+    from segmentation_measurement._classification_widget import _class_color_dict
+    full = _class_color_dict([1, 2, 3], max_class=3)
+    sparse = _class_color_dict([3], max_class=3)
+    assert full[3] == sparse[3]
+
+
+def test_class_color_dict_uses_id_not_position():
+    from segmentation_measurement._classification_widget import _class_color_dict
+    # Class 1 should get a different colour from class 3 — the bug was
+    # that a layer containing only class 3 would receive the colour of
+    # class 1 because of position-based assignment.
+    colors = _class_color_dict([3], max_class=3)
+    full = _class_color_dict([1, 2, 3], max_class=3)
+    assert colors[3] != full[1]
+
+
+def test_class_color_dict_picks_tab20_for_many_classes():
+    from segmentation_measurement._classification_widget import _class_color_dict
+    colors = _class_color_dict([1, 12], max_class=12)
+    # tab10 has 10 colours; tab20 has 20.  With max_class=12 we must be in
+    # tab20, so class 12 maps to tab20 index 11 (not wrapping back to 1).
+    import matplotlib
+    cmap20 = matplotlib.colormaps["tab20"]
+    assert colors[12] == tuple(cmap20(11))
+
+
+def test_compress_decompress_round_trip():
+    from segmentation_measurement._classification_widget import (
+        _compress_annotation,
+        _decompress_annotation,
+    )
+    arr = np.zeros((30, 30), dtype=np.int32)
+    arr[5:10, 5:10] = 1
+    arr[20:25, 20:25] = 2
+    compressed = _compress_annotation(arr)
+    restored = _decompress_annotation(compressed)
+    np.testing.assert_array_equal(restored, arr)
+
+
+def test_compress_empty_annotation():
+    from segmentation_measurement._classification_widget import (
+        _compress_annotation,
+        _decompress_annotation,
+    )
+    arr = np.zeros((10, 10), dtype=np.int32)
+    compressed = _compress_annotation(arr)
+    assert compressed["values"].size == 0
+    restored = _decompress_annotation(compressed)
+    np.testing.assert_array_equal(restored, arr)
+
+
+def test_group_target_does_not_clear_segmentation_when_no_annotation(
+    make_napari_viewer, qtbot
+):
+    """Selecting a group must not zero a segmentation layer just because
+    no annotation layer has been chosen yet.
+
+    Regression: the annotation combo defaulted to the first Labels layer
+    in the viewer (often a group member), so the per-member persistence
+    code zeroed that layer when loading the first member's (empty) cache.
+    """
+    from segmentation_measurement._classification_widget import ClassificationWidget
+    from segmentation_measurement._groups import ROLE_SEGMENTATION, set_group
+    viewer = make_napari_viewer()
+    layer1 = _make_seg_with_features(viewer, n=20, name="cells_01")
+    layer2 = _make_seg_with_features(viewer, n=20, name="cells_02")
+    seg1_before = layer1.data.copy()
+    seg2_before = layer2.data.copy()
+    set_group(
+        viewer, "exp_1", {ROLE_SEGMENTATION: ["cells_01", "cells_02"]}
+    )
+    widget = ClassificationWidget(viewer)
+    qtbot.addWidget(widget)
+    widget._target_combo.setCurrentText("exp_1")
+    widget._seg_combo.setCurrentText("cells_02")  # also trigger a member switch
+    np.testing.assert_array_equal(layer1.data, seg1_before)
+    np.testing.assert_array_equal(layer2.data, seg2_before)
+
+
+def test_ann_combo_defaults_to_none_sentinel(make_napari_viewer, qtbot):
+    from segmentation_measurement._classification_widget import ClassificationWidget
+    viewer = make_napari_viewer()
+    viewer.add_labels(np.zeros((10, 10), dtype=int), name="cells_01")
+    widget = ClassificationWidget(viewer)
+    qtbot.addWidget(widget)
+    assert widget._ann_combo.currentText() == "(none)"
+
+
+def test_member_persistence_round_trip(make_napari_viewer, qtbot):
+    from segmentation_measurement._classification_widget import ClassificationWidget
+    from segmentation_measurement._groups import ROLE_SEGMENTATION, set_group
+    viewer = make_napari_viewer()
+    _make_seg_with_features(viewer, n=20, name="cells_01")
+    _make_seg_with_features(viewer, n=20, name="cells_02")
+    set_group(
+        viewer, "exp_1", {ROLE_SEGMENTATION: ["cells_01", "cells_02"]}
+    )
+    ann = viewer.add_labels(
+        np.zeros((30, 30), dtype=np.int32), name="annotations"
+    )
+    widget = ClassificationWidget(viewer)
+    qtbot.addWidget(widget)
+    widget._target_combo.setCurrentText("exp_1")
+    widget._ann_combo.setCurrentText("annotations")
+
+    # Paint annotations on member 1.
+    widget._seg_combo.setCurrentText("cells_01")
+    new_data = np.zeros((30, 30), dtype=np.int32)
+    new_data[5:10, 5:10] = 1
+    ann.data = new_data
+
+    # Switch to member 2 — annotation layer should be cleared.
+    widget._seg_combo.setCurrentText("cells_02")
+    assert int(ann.data.sum()) == 0
+
+    # Paint different annotations on member 2.
+    new_data2 = np.zeros((30, 30), dtype=np.int32)
+    new_data2[20:25, 20:25] = 2
+    ann.data = new_data2
+
+    # Switch back to member 1 — original member-1 annotations restored.
+    widget._seg_combo.setCurrentText("cells_01")
+    np.testing.assert_array_equal(ann.data[5:10, 5:10], 1)
+    assert int(ann.data[20:25, 20:25].sum()) == 0
+
+    # Switch to member 2 again — its painted annotations come back.
+    widget._seg_combo.setCurrentText("cells_02")
+    np.testing.assert_array_equal(ann.data[20:25, 20:25], 2)
+    assert int(ann.data[5:10, 5:10].sum()) == 0
+
+
+def test_persistence_inactive_in_single_mode(make_napari_viewer, qtbot):
+    from segmentation_measurement._classification_widget import ClassificationWidget
+    viewer = make_napari_viewer()
+    _make_seg_with_features(viewer, n=20, name="cells_01")
+    _make_seg_with_features(viewer, n=20, name="cells_02")
+    ann = viewer.add_labels(
+        np.zeros((30, 30), dtype=np.int32), name="annotations"
+    )
+    widget = ClassificationWidget(viewer)
+    qtbot.addWidget(widget)
+    # In single-layer mode, switching the seg combo must not touch the
+    # annotation layer.
+    widget._seg_combo.setCurrentText("cells_01")
+    new_data = np.zeros((30, 30), dtype=np.int32)
+    new_data[5:10, 5:10] = 1
+    ann.data = new_data
+    widget._ann_combo.setCurrentText("annotations")
+    widget._seg_combo.setCurrentText("cells_02")
+    np.testing.assert_array_equal(ann.data[5:10, 5:10], 1)
+    assert widget._member_annotations == {}
+
+
+def test_target_switch_saves_current_member(make_napari_viewer, qtbot):
+    from segmentation_measurement._classification_widget import ClassificationWidget
+    from segmentation_measurement._groups import ROLE_SEGMENTATION, set_group
+    viewer = make_napari_viewer()
+    _make_seg_with_features(viewer, n=20, name="cells_01")
+    _make_seg_with_features(viewer, n=20, name="cells_02")
+    set_group(
+        viewer, "exp_1", {ROLE_SEGMENTATION: ["cells_01", "cells_02"]}
+    )
+    ann = viewer.add_labels(
+        np.zeros((30, 30), dtype=np.int32), name="annotations"
+    )
+    widget = ClassificationWidget(viewer)
+    qtbot.addWidget(widget)
+    widget._ann_combo.setCurrentText("annotations")
+    widget._target_combo.setCurrentText("exp_1")
+    # Paint on member 1.
+    new_data = np.zeros((30, 30), dtype=np.int32)
+    new_data[5:10, 5:10] = 1
+    ann.data = new_data
+    # Switch back to single-layer mode — the painted annotations should be
+    # cached so coming back to the group restores them.
+    widget._target_combo.setCurrentText("<single layer>")
+    assert "cells_01" in widget._member_annotations
+    widget._target_combo.setCurrentText("exp_1")
+    widget._seg_combo.setCurrentText("cells_01")
+    np.testing.assert_array_equal(ann.data[5:10, 5:10], 1)
+
+
+def test_collect_annotation_ids_pools_across_members(make_napari_viewer, qtbot):
+    from segmentation_measurement._classification_widget import ClassificationWidget
+    from segmentation_measurement._groups import ROLE_SEGMENTATION, set_group
+    viewer = make_napari_viewer()
+    df1 = _make_annotated_df(20).copy()
+    df1["annotation"] = [1] * 10 + [2] * 10
+    df2 = _make_annotated_df(20).copy()
+    df2["annotation"] = [3] * 10 + [2] * 10
+    _make_seg_with_features(viewer, n=20, features=df1, name="cells_01")
+    _make_seg_with_features(viewer, n=20, features=df2, name="cells_02")
+    set_group(
+        viewer, "exp_1", {ROLE_SEGMENTATION: ["cells_01", "cells_02"]}
+    )
+    widget = ClassificationWidget(viewer)
+    qtbot.addWidget(widget)
+    widget._target_combo.setCurrentText("exp_1")
+    assert widget._collect_annotation_ids() == [1, 2, 3]

@@ -19,10 +19,21 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from segmentation_measurement._groups import (
+    ROLE_SEGMENTATION,
+    get_group,
+    list_groups,
+    subscribe,
+)
 from segmentation_measurement._layer_features import (
+    concat_features_for_group,
     merge_features_into_layer,
     show_features_table,
+    split_and_merge_back,
 )
+
+_TARGET_SINGLE = "<single layer>"
+_EXCLUDED_COLS = frozenset({"index", "_source_layer", "category_id"})
 
 
 class ThresholdWidget(QWidget):
@@ -30,13 +41,23 @@ class ThresholdWidget(QWidget):
 
     Operates on the ``features`` table of the selected Labels layer (as
     populated by the measurement widgets or loaded into the layer via the
-    Table Manipulation widget).  Picking the layer triggers a refresh of the
-    available numeric columns and the histogram.
+    Table Manipulation widget).  Picking the layer triggers a refresh of
+    the available numeric columns and the histogram.
 
-    On *Categorize*, the chosen thresholds are applied to the selected column
-    and the resulting ``category_id`` / ``category_name`` columns are merged
-    back into the source layer's ``features``.  A new label layer is created
-    that colours each segment by its category for visualization.
+    The *Target* combo selects what to categorize:
+
+    * ``<single layer>`` (default): operate on the layer chosen in the
+      *Segmentation* combo.  Original behaviour.
+    * a group name: pull features from every layer in that group's
+      ``segmentation`` role list, concatenate them for the histogram and
+      threshold suggestion, apply the same thresholds across all members,
+      and emit one output label layer per member named
+      ``{output}_{layer_name}`` (or just ``{output}`` if the group has
+      a single member).
+
+    On *Categorize*, the chosen thresholds are applied and the resulting
+    ``category_id`` / ``category_name`` columns are merged back into the
+    relevant source layers' ``features``.
     """
 
     def __init__(self, napari_viewer: napari.Viewer) -> None:
@@ -50,7 +71,12 @@ class ThresholdWidget(QWidget):
         self._setup_ui()
         self._viewer.layers.events.inserted.connect(self._update_seg_combo)
         self._viewer.layers.events.removed.connect(self._update_seg_combo)
+        self._unsubscribe = subscribe(self._viewer, self._update_target_combo)
+        self.destroyed.connect(lambda *_: self._unsubscribe())
+        self._update_target_combo()
         self._update_seg_combo()
+
+    # --------------------------------------------------------------- UI ---
 
     def _setup_ui(self) -> None:
         outer_layout = QVBoxLayout()
@@ -64,6 +90,13 @@ class ThresholdWidget(QWidget):
         scroll.setWidget(inner)
         layout = QVBoxLayout()
         inner.setLayout(layout)
+
+        target_layout = QHBoxLayout()
+        target_layout.addWidget(QLabel("Target:"))
+        self._target_combo = QComboBox()
+        self._target_combo.currentTextChanged.connect(self._on_target_changed)
+        target_layout.addWidget(self._target_combo)
+        layout.addLayout(target_layout)
 
         seg_layout = QHBoxLayout()
         seg_layout.addWidget(QLabel("Segmentation:"))
@@ -170,47 +203,103 @@ class ThresholdWidget(QWidget):
             row_widget.setLayout(row)
             self._threshold_layout.addWidget(row_widget)
 
+    # --------------------------------------------------------- Plumbing ---
+
     def _update_seg_combo(self, event: object = None) -> None:
         from napari.layers import Labels
         label_layers = [
             layer.name for layer in self._viewer.layers if isinstance(layer, Labels)
         ]
         current = self._seg_combo.currentText()
+        self._seg_combo.blockSignals(True)
         self._seg_combo.clear()
         self._seg_combo.addItems(label_layers)
         if current in label_layers:
             self._seg_combo.setCurrentText(current)
+        self._seg_combo.blockSignals(False)
+        self._on_target_changed(self._target_combo.currentText())
 
-    def _current_features(self) -> pd.DataFrame | None:
-        seg_name = self._seg_combo.currentText()
-        if not seg_name or seg_name not in [l.name for l in self._viewer.layers]:
-            return None
-        layer = self._viewer.layers[seg_name]
-        feats = getattr(layer, "features", None)
-        if feats is None or len(feats.columns) == 0:
-            return None
-        return feats
+    def _update_target_combo(self) -> None:
+        groups = list_groups(self._viewer)
+        current = self._target_combo.currentText()
+        self._target_combo.blockSignals(True)
+        self._target_combo.clear()
+        self._target_combo.addItem(_TARGET_SINGLE)
+        self._target_combo.addItems(groups)
+        items = [
+            self._target_combo.itemText(i)
+            for i in range(self._target_combo.count())
+        ]
+        if current in items:
+            self._target_combo.setCurrentText(current)
+        else:
+            self._target_combo.setCurrentText(_TARGET_SINGLE)
+        self._target_combo.blockSignals(False)
+        self._on_target_changed(self._target_combo.currentText())
+
+    def _on_target_changed(self, target: str) -> None:
+        if target == _TARGET_SINGLE:
+            self._seg_combo.setEnabled(True)
+        else:
+            self._seg_combo.setEnabled(False)
+            try:
+                members = get_group(self._viewer, target)
+            except KeyError:
+                members = {}
+            seg_layers = members.get(ROLE_SEGMENTATION, [])
+            if seg_layers and seg_layers[0] in self._viewer.layers:
+                self._seg_combo.blockSignals(True)
+                self._seg_combo.setCurrentText(seg_layers[0])
+                self._seg_combo.blockSignals(False)
+        self._update_col_combo()
 
     def _on_seg_selected(self, name: str) -> None:
         self._update_col_combo()
 
     def _update_col_combo(self) -> None:
-        feats = self._current_features()
+        feats = self._current_features_frame()
         self._col_combo.blockSignals(True)
+        current = self._col_combo.currentText()
         self._col_combo.clear()
         if feats is not None:
             numeric_cols = [
                 c for c in feats.select_dtypes(include="number").columns
-                if c not in ("index", "category_id")
+                if c not in _EXCLUDED_COLS
             ]
             self._col_combo.addItems(numeric_cols)
+            if current in numeric_cols:
+                self._col_combo.setCurrentText(current)
         self._col_combo.blockSignals(False)
         self._update_histogram()
+
+    # ---------------------------------------------------- Feature access ---
+
+    def _current_features_frame(self) -> pd.DataFrame | None:
+        """Return the features frame for the current target (or None)."""
+        target = self._target_combo.currentText()
+        if target == _TARGET_SINGLE:
+            return self._features_for_layer(self._seg_combo.currentText())
+        try:
+            return concat_features_for_group(
+                self._viewer, target, ROLE_SEGMENTATION
+            )
+        except (ValueError, KeyError):
+            return None
+
+    def _features_for_layer(self, name: str | None) -> pd.DataFrame | None:
+        if not name or name not in [layer.name for layer in self._viewer.layers]:
+            return None
+        feats = getattr(self._viewer.layers[name], "features", None)
+        if feats is None or len(feats.columns) == 0:
+            return None
+        return feats
+
+    # -------------------------------------------------------- Histogram ---
 
     def _update_histogram(self) -> None:
         if self._hist_ax is None:
             return
-        feats = self._current_features()
+        feats = self._current_features_frame()
         ax = self._hist_ax
         ax.clear()
         if feats is None:
@@ -231,7 +320,7 @@ class ThresholdWidget(QWidget):
 
     def _suggest_thresholds(self) -> None:
         from segmentation_measurement.analysis import suggest_thresholds
-        feats = self._current_features()
+        feats = self._current_features_frame()
         if feats is None:
             return
         col = self._col_combo.currentText()
@@ -245,37 +334,82 @@ class ThresholdWidget(QWidget):
             spin.blockSignals(False)
         self._update_histogram()
 
+    # ------------------------------------------------------ Categorize ---
+
     def _run_categorization(self) -> None:
         from segmentation_measurement.analysis import categorize_by_threshold
-        seg_name = self._seg_combo.currentText()
-        if not seg_name:
-            return
-        seg_layer = self._viewer.layers[seg_name]
-        feats = getattr(seg_layer, "features", None)
-        if feats is None or len(feats.columns) == 0:
-            return
+
         col = self._col_combo.currentText()
         if not col:
             return
         thresholds = [spin.value() for spin in self._threshold_spins]
         names = [edit.text() for edit in self._name_edits]
-        categorized = categorize_by_threshold(feats, col, thresholds, names)
-        # Only push back the new columns (avoid round-tripping unchanged ones).
-        new_cols = categorized[["index", "category_id", "category_name"]]
-        merge_features_into_layer(seg_layer, new_cols)
+        out_name = self._out_name.text() or "categories"
+        target = self._target_combo.currentText()
 
-        segmentation = seg_layer.data
+        if target == _TARGET_SINGLE:
+            seg_name = self._seg_combo.currentText()
+            if not seg_name or seg_name not in self._viewer.layers:
+                return
+            seg_layer = self._viewer.layers[seg_name]
+            feats = getattr(seg_layer, "features", None)
+            if feats is None or len(feats.columns) == 0:
+                return
+            categorized = categorize_by_threshold(feats, col, thresholds, names)
+            merge_features_into_layer(
+                seg_layer,
+                categorized[["index", "category_id", "category_name"]],
+            )
+            self._build_label_layer(seg_layer, categorized, out_name)
+            show_features_table(self._viewer, seg_layer)
+            return
+
+        # group target
+        try:
+            members = get_group(self._viewer, target)
+        except KeyError:
+            return
+        seg_layers = members.get(ROLE_SEGMENTATION, [])
+        if not seg_layers:
+            return
+
+        df = concat_features_for_group(self._viewer, target, ROLE_SEGMENTATION)
+        categorized = categorize_by_threshold(df, col, thresholds, names)
+        split_and_merge_back(
+            self._viewer, categorized, ["category_id", "category_name"]
+        )
+
+        suffix_per_member = len(seg_layers) > 1
+        first_layer = None
+        for seg_name in seg_layers:
+            if seg_name not in self._viewer.layers:
+                continue
+            seg_layer = self._viewer.layers[seg_name]
+            sub = categorized[categorized["_source_layer"] == seg_name]
+            layer_out_name = (
+                f"{out_name}_{seg_name}" if suffix_per_member else out_name
+            )
+            self._build_label_layer(seg_layer, sub, layer_out_name)
+            if first_layer is None:
+                first_layer = seg_layer
+        if first_layer is not None:
+            show_features_table(self._viewer, first_layer)
+
+    def _build_label_layer(
+        self,
+        source_layer: object,
+        categorized: pd.DataFrame,
+        out_name: str,
+    ) -> None:
+        segmentation = source_layer.data
         result = np.zeros_like(segmentation)
         for label_id, cat_id in zip(
             categorized["index"].values,
             categorized["category_id"].values,
         ):
             result[segmentation == int(label_id)] = int(cat_id)
-        out_name = self._out_name.text() or "categories"
         existing = [layer.name for layer in self._viewer.layers]
         if out_name in existing:
             self._viewer.layers[out_name].data = result
         else:
             self._viewer.add_labels(result, name=out_name)
-
-        show_features_table(self._viewer, seg_layer)

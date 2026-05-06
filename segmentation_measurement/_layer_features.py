@@ -80,6 +80,124 @@ def merge_features_into_layer(layer: "Layer", df: pd.DataFrame) -> pd.DataFrame:
     return merged
 
 
+def concat_features_for_group(
+    viewer: "napari.Viewer",
+    group_name: str,
+    role: str = "segmentation",
+) -> pd.DataFrame:
+    """Concatenate ``features`` across one group's members for a role.
+
+    Pulls ``layer.features`` from each layer in the group's role list and
+    stacks them vertically with an added ``_source_layer`` column
+    identifying the source layer name.  Used by analysis widgets to run
+    a single operation (clustering, classification, thresholding) jointly
+    across the members of a batch group.
+
+    Args:
+        viewer: napari Viewer instance.
+        group_name: Name of the group to pull from.
+        role: Role whose layer list is iterated.  Defaults to
+            ``'segmentation'``.
+
+    Returns:
+        pd.DataFrame: Concatenated frame with the original feature columns
+            plus a ``_source_layer`` column.
+
+    Raises:
+        KeyError: If the group does not exist or one of its layers is no
+            longer present in the viewer.
+        ValueError: If the role is undefined or empty for the group, a
+            member layer has no features, or feature columns differ across
+            members.
+    """
+    from segmentation_measurement._groups import get_group
+
+    members = get_group(viewer, group_name)
+    layers = members.get(role, [])
+    if not layers:
+        raise ValueError(
+            f"Group '{group_name}' has no layers under role '{role}'."
+        )
+
+    frames: list[pd.DataFrame] = []
+    column_set: set[str] | None = None
+    reference_source: str | None = None
+    for layer_name in layers:
+        if layer_name not in viewer.layers:
+            raise KeyError(
+                f"Group '{group_name}' role '{role}' references layer "
+                f"'{layer_name}', which is not in the viewer."
+            )
+        layer = viewer.layers[layer_name]
+        feats = getattr(layer, "features", None)
+        if feats is None or len(feats.columns) == 0:
+            raise ValueError(
+                f"Layer '{layer_name}' (group '{group_name}', role "
+                f"'{role}') has no features. Run a measurement on it first."
+            )
+        cols = set(feats.columns)
+        if column_set is None:
+            column_set = cols
+            reference_source = layer_name
+        elif cols != column_set:
+            missing = sorted(column_set - cols)
+            extra = sorted(cols - column_set)
+            raise ValueError(
+                f"Feature columns of layer '{layer_name}' do not match "
+                f"those of '{reference_source}'. "
+                f"Missing in '{layer_name}': {missing}. "
+                f"Extra in '{layer_name}': {extra}."
+            )
+        frame = feats.copy()
+        frame["_source_layer"] = layer_name
+        frames.append(frame)
+
+    return pd.concat(frames, ignore_index=True)
+
+
+def split_and_merge_back(
+    viewer: "napari.Viewer",
+    df: pd.DataFrame,
+    columns: list[str],
+) -> None:
+    """Split a concatenated frame on ``_source_layer`` and merge per-layer.
+
+    Inverse of :func:`concat_features_across_groups`.  For each unique value
+    in ``df['_source_layer']``, takes the rows for that source, selects
+    ``['index'] + columns``, and merges them into the corresponding viewer
+    layer's ``features`` via :func:`merge_features_into_layer`.
+
+    Args:
+        viewer: napari Viewer instance.
+        df: DataFrame with at least ``_source_layer`` and ``index`` columns.
+        columns: New column names to merge back into each layer's features.
+            ``index`` is always merged irrespective of this argument.
+
+    Raises:
+        ValueError: If ``df`` is missing ``_source_layer`` or ``index``, or
+            any entry of ``columns`` is not a column of ``df``.
+        KeyError: If ``df`` references a layer not present in the viewer.
+    """
+    if "_source_layer" not in df.columns:
+        raise ValueError("DataFrame is missing the '_source_layer' column.")
+    if "index" not in df.columns:
+        raise ValueError("DataFrame is missing the 'index' column.")
+    missing_cols = [c for c in columns if c not in df.columns]
+    if missing_cols:
+        raise ValueError(
+            f"DataFrame is missing requested column(s): {missing_cols}."
+        )
+    keep = ["index"] + [c for c in columns if c != "index"]
+    for source, sub in df.groupby("_source_layer", sort=False):
+        if source not in viewer.layers:
+            raise KeyError(
+                f"DataFrame references layer '{source}', which is not in "
+                f"the viewer."
+            )
+        layer = viewer.layers[source]
+        merge_features_into_layer(layer, sub[keep].reset_index(drop=True))
+
+
 def show_features_table(viewer: "napari.Viewer", layer: "Layer") -> None:
     """Open the napari built-in Features Table dock and select ``layer``.
 

@@ -21,6 +21,80 @@ def _make_cell_nuc_seg_2d():
     return cell_seg, nuc_seg
 
 
+def test_target_combo_lists_groups(make_napari_viewer, qtbot):
+    from segmentation_measurement._cell_nucleus_widget import CellNucleusWidget
+    from segmentation_measurement._groups import (
+        ROLE_NUCLEUS_SEGMENTATION,
+        ROLE_SEGMENTATION,
+        set_group,
+    )
+    viewer = make_napari_viewer()
+    viewer.add_labels(np.zeros((10, 10), dtype=int), name="cells_01")
+    viewer.add_labels(np.zeros((10, 10), dtype=int), name="nuclei_01")
+    widget = CellNucleusWidget(viewer)
+    qtbot.addWidget(widget)
+    items = lambda: [
+        widget._target_combo.itemText(i)
+        for i in range(widget._target_combo.count())
+    ]
+    assert items() == ["<single layer>"]
+    set_group(
+        viewer,
+        "exp_1",
+        {
+            ROLE_SEGMENTATION: ["cells_01"],
+            ROLE_NUCLEUS_SEGMENTATION: ["nuclei_01"],
+        },
+    )
+    assert "exp_1" in items()
+
+
+@_CI_XFAIL
+def test_group_mode_iterates_triples(make_napari_viewer, qtbot):
+    from segmentation_measurement._cell_nucleus_widget import CellNucleusWidget
+    from segmentation_measurement._groups import (
+        ROLE_NUCLEUS_SEGMENTATION,
+        ROLE_SEGMENTATION,
+        set_group,
+    )
+    cell1, nuc1 = _make_cell_nuc_seg_2d()
+    cell2, nuc2 = _make_cell_nuc_seg_2d()
+    viewer = make_napari_viewer()
+    cell_layer1 = viewer.add_labels(cell1, name="cells_01")
+    cell_layer2 = viewer.add_labels(cell2, name="cells_02")
+    viewer.add_labels(nuc1, name="nuclei_01")
+    viewer.add_labels(nuc2, name="nuclei_02")
+    set_group(
+        viewer,
+        "exp_1",
+        {
+            ROLE_SEGMENTATION: ["cells_01", "cells_02"],
+            ROLE_NUCLEUS_SEGMENTATION: ["nuclei_01", "nuclei_02"],
+        },
+    )
+    widget = CellNucleusWidget(viewer)
+    qtbot.addWidget(widget)
+    widget._target_combo.setCurrentText("exp_1")
+    assert not widget._cell_combo.isEnabled()
+    assert not widget._nuc_combo.isEnabled()
+    widget._run_measurement()
+    assert "n_nuclei" in cell_layer1.features.columns
+    assert "n_nuclei" in cell_layer2.features.columns
+
+
+def test_group_mode_without_nucleus_role_raises(make_napari_viewer, qtbot):
+    from segmentation_measurement._cell_nucleus_widget import CellNucleusWidget
+    from segmentation_measurement._groups import ROLE_SEGMENTATION, set_group
+    viewer = make_napari_viewer()
+    viewer.add_labels(np.zeros((10, 10), dtype=np.int32), name="cells_01")
+    set_group(viewer, "exp_1", {ROLE_SEGMENTATION: ["cells_01"]})
+    widget = CellNucleusWidget(viewer)
+    qtbot.addWidget(widget)
+    widget._target_combo.setCurrentText("exp_1")
+    with pytest.raises(ValueError, match="no nucleus segmentation"):
+        widget._run_measurement()
+
+
 def test_widget_instantiation(make_napari_viewer, qtbot):
     from segmentation_measurement._cell_nucleus_widget import CellNucleusWidget
     viewer = make_napari_viewer()

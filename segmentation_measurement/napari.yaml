@@ -26,6 +26,9 @@ contributions:
     - id: segmentation-measurement.table_manipulation_widget
       python_name: segmentation_measurement._table_manipulation_widget:TableManipulationWidget
       title: Table Manipulation
+    - id: segmentation-measurement.groups_widget
+      python_name: segmentation_measurement._groups_widget:GroupManagerWidget
+      title: Group Manager
   widgets:
     - command: segmentation-measurement.postprocessing_widget
       display_name: Postprocessing
@@ -43,3 +46,5 @@ contributions:
       display_name: Classification Analysis
     - command: segmentation-measurement.table_manipulation_widget
       display_name: Table Manipulation
+    - command: segmentation-measurement.groups_widget
+      display_name: Group Manager
