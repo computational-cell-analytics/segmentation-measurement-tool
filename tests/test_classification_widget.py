@@ -130,6 +130,229 @@ def test_project_annotations_updates_class_names_table(make_napari_viewer, qtbot
     assert id_item.text() == "1"
 
 
+def test_annotation_projection_button_removed(make_napari_viewer, qtbot):
+    from qtpy.QtWidgets import QCheckBox, QPushButton
+    from segmentation_measurement._classification_widget import ClassificationWidget
+
+    viewer = make_napari_viewer()
+    widget = ClassificationWidget(viewer)
+    qtbot.addWidget(widget)
+
+    button_texts = [button.text() for button in widget.findChildren(QPushButton)]
+    assert "Project annotations to features" not in button_texts
+    assert "Load classifier" not in button_texts
+    assert "Apply" not in button_texts
+    assert "Train & Apply" in button_texts
+    live_update = [
+        checkbox
+        for checkbox in widget.findChildren(QCheckBox)
+        if checkbox.text() == "Live Update"
+    ]
+    assert len(live_update) == 1
+    assert live_update[0].isChecked()
+    assert not widget._train_btn.isEnabled()
+
+
+def test_live_update_checkbox_controls_train_button(make_napari_viewer, qtbot):
+    from segmentation_measurement._classification_widget import ClassificationWidget
+
+    viewer = make_napari_viewer()
+    widget = ClassificationWidget(viewer)
+    qtbot.addWidget(widget)
+
+    assert widget._live_update_checkbox.isChecked()
+    assert not widget._train_btn.isEnabled()
+    widget._live_update_checkbox.setChecked(False)
+    assert widget._train_btn.isEnabled()
+    widget._live_update_checkbox.setChecked(True)
+    assert not widget._train_btn.isEnabled()
+
+
+def test_annotation_paint_updates_features_automatically(
+    make_napari_viewer, qtbot
+):
+    from segmentation_measurement._classification_widget import ClassificationWidget
+
+    seg = np.zeros((10, 10), dtype=np.int32)
+    seg[1:4, 1:4] = 1
+    df = pd.DataFrame({"index": [1], "mean_intensity": [10.0]})
+    viewer = make_napari_viewer()
+    seg_layer = viewer.add_labels(seg, name="seg")
+    seg_layer.features = df
+    widget = ClassificationWidget(viewer)
+    qtbot.addWidget(widget)
+    widget._seg_combo.setCurrentText("seg")
+    widget._create_annotation_layer()
+    ann = viewer.layers[widget._ann_combo.currentText()]
+
+    ann.brush_size = 1
+    ann.selected_label = 1
+    ann.paint((2, 2), ann.selected_label)
+    assert "annotation" not in seg_layer.features.columns
+    qtbot.wait(widget._annotation_projection_timer.interval() + 50)
+
+    feats = seg_layer.features.set_index("index")
+    assert int(feats.loc[1, "annotation"]) == 1
+
+
+def test_automatic_annotation_projection_preserves_layer_selection(
+    make_napari_viewer, qtbot
+):
+    from segmentation_measurement._classification_widget import ClassificationWidget
+
+    seg = np.zeros((10, 10), dtype=np.int32)
+    seg[1:4, 1:4] = 1
+    df = pd.DataFrame({"index": [1], "mean_intensity": [10.0]})
+    viewer = make_napari_viewer()
+    seg_layer = viewer.add_labels(seg, name="seg")
+    seg_layer.features = df
+    widget = ClassificationWidget(viewer)
+    qtbot.addWidget(widget)
+    widget._seg_combo.setCurrentText("seg")
+    widget._create_annotation_layer()
+    ann = viewer.layers[widget._ann_combo.currentText()]
+
+    viewer.layers.selection.clear()
+    viewer.layers.selection.add(ann)
+    viewer.layers.selection.active = ann
+    ann.brush_size = 1
+    ann.selected_label = 1
+    ann.paint((2, 2), ann.selected_label)
+    qtbot.wait(widget._annotation_projection_timer.interval() + 50)
+
+    feats = seg_layer.features.set_index("index")
+    assert int(feats.loc[1, "annotation"]) == 1
+    assert viewer.layers.selection.active is ann
+    assert ann in viewer.layers.selection
+    assert seg_layer not in viewer.layers.selection
+
+
+def test_annotation_frame_marks_active_annotation_layer(
+    make_napari_viewer, qtbot
+):
+    from segmentation_measurement._classification_widget import (
+        _ANNOTATION_FRAME_LAYER_NAME,
+        ClassificationWidget,
+    )
+
+    seg = np.zeros((10, 12), dtype=np.int32)
+    seg[1:4, 1:4] = 1
+    viewer = make_napari_viewer()
+    seg_layer = viewer.add_labels(seg, name="seg")
+    seg_layer.translate = (5, 7)
+    seg_layer.scale = (2, 3)
+    widget = ClassificationWidget(viewer)
+    qtbot.addWidget(widget)
+    widget._seg_combo.setCurrentText("seg")
+    widget._create_annotation_layer()
+    ann = viewer.layers[widget._ann_combo.currentText()]
+
+    assert _ANNOTATION_FRAME_LAYER_NAME in viewer.layers
+    frame = viewer.layers[_ANNOTATION_FRAME_LAYER_NAME]
+    expected = np.array([
+        [-0.5, -0.5],
+        [-0.5, 11.5],
+        [9.5, 11.5],
+        [9.5, -0.5],
+        [-0.5, -0.5],
+    ])
+    np.testing.assert_allclose(frame.data[0], expected)
+    assert tuple(frame.translate) == tuple(ann.translate)
+    assert tuple(frame.scale) == tuple(ann.scale)
+    assert str(frame.mode) == "pan_zoom"
+    assert frame.visible
+    assert viewer.layers.selection.active is ann
+
+    ann_items = [
+        widget._ann_combo.itemText(i)
+        for i in range(widget._ann_combo.count())
+    ]
+    assert _ANNOTATION_FRAME_LAYER_NAME not in ann_items
+
+
+def test_annotation_erase_and_relabel_update_features_automatically(
+    make_napari_viewer, qtbot
+):
+    from segmentation_measurement._classification_widget import ClassificationWidget
+
+    seg = np.zeros((10, 10), dtype=np.int32)
+    seg[1:4, 1:4] = 1
+    df = pd.DataFrame({"index": [1], "mean_intensity": [10.0]})
+    viewer = make_napari_viewer()
+    seg_layer = viewer.add_labels(seg, name="seg")
+    seg_layer.features = df
+    widget = ClassificationWidget(viewer)
+    qtbot.addWidget(widget)
+    widget._seg_combo.setCurrentText("seg")
+    widget._create_annotation_layer()
+    ann = viewer.layers[widget._ann_combo.currentText()]
+    ann.brush_size = 1
+
+    ann.paint((2, 2), 1)
+    qtbot.wait(widget._annotation_projection_timer.interval() + 50)
+    assert int(seg_layer.features.set_index("index").loc[1, "annotation"]) == 1
+
+    ann.paint((2, 2), 0)
+    qtbot.wait(widget._annotation_projection_timer.interval() + 50)
+    assert int(seg_layer.features.set_index("index").loc[1, "annotation"]) == 0
+
+    ann.paint((2, 2), 2)
+    qtbot.wait(widget._annotation_projection_timer.interval() + 50)
+    assert int(seg_layer.features.set_index("index").loc[1, "annotation"]) == 2
+
+
+def test_live_update_trains_and_applies_after_annotation_change(
+    make_napari_viewer, qtbot
+):
+    from segmentation_measurement._classification_widget import ClassificationWidget
+
+    seg = np.zeros((10, 10), dtype=np.int32)
+    seg[1:4, 1:4] = 1
+    seg[5:8, 5:8] = 2
+    df = pd.DataFrame({
+        "index": [1, 2],
+        "mean_intensity": [10.0, 90.0],
+    })
+    viewer = make_napari_viewer()
+    seg_layer = viewer.add_labels(seg, name="seg")
+    seg_layer.features = df
+    widget = ClassificationWidget(viewer)
+    qtbot.addWidget(widget)
+    widget._seg_combo.setCurrentText("seg")
+    widget._create_annotation_layer()
+    ann = viewer.layers[widget._ann_combo.currentText()]
+    viewer.layers.selection.clear()
+    viewer.layers.selection.add(ann)
+    viewer.layers.selection.active = ann
+    live_update_calls = []
+    original_live_update = widget._train_and_apply_live
+
+    def wrapped_live_update():
+        live_update_calls.append(True)
+        original_live_update()
+
+    widget._train_and_apply_live = wrapped_live_update
+
+    ann.brush_size = 1
+    ann.paint((2, 2), 1)
+    ann.paint((6, 6), 2)
+    qtbot.wait(widget._annotation_projection_timer.interval() + 50)
+
+    feats = seg_layer.features.set_index("index")
+    assert widget._classifier is not None
+    assert "classification_id" in feats.columns
+    assert "classification" in viewer.layers
+    out = viewer.layers["classification"]
+    assert int(out.data[2, 2]) == 1
+    assert int(out.data[6, 6]) == 2
+    assert viewer.layers.selection.active is ann
+    assert ann in viewer.layers.selection
+    assert len(live_update_calls) == 1
+    qtbot.wait(widget._annotation_projection_timer.interval() * 2)
+    assert len(live_update_calls) == 1
+    assert not widget._annotation_projection_timer.isActive()
+
+
 def test_get_class_names_reads_table(make_napari_viewer, qtbot):
     from segmentation_measurement._classification_widget import ClassificationWidget
     from qtpy.QtWidgets import QTableWidgetItem
@@ -256,17 +479,23 @@ def test_train_and_apply_updates_existing_layer(make_napari_viewer, qtbot):
 
 @_CI_XFAIL
 def test_create_annotation_layer(make_napari_viewer, qtbot):
-    from segmentation_measurement._classification_widget import ClassificationWidget
+    from napari.layers import Labels
+    from segmentation_measurement._classification_widget import (
+        _ANNOTATION_INITIAL_BRUSH_SIZE,
+        ClassificationWidget,
+    )
     seg = np.zeros((10, 10), dtype=np.int32)
     viewer = make_napari_viewer()
     viewer.add_labels(seg, name="seg")
     widget = ClassificationWidget(viewer)
     qtbot.addWidget(widget)
     widget._seg_combo.setCurrentText("seg")
-    initial_count = len(viewer.layers)
+    initial_count = sum(isinstance(layer, Labels) for layer in viewer.layers)
     widget._create_annotation_layer()
-    assert len(viewer.layers) == initial_count + 1
+    label_count = sum(isinstance(layer, Labels) for layer in viewer.layers)
+    assert label_count == initial_count + 1
     assert widget._ann_combo.currentText() == "annotations"
+    assert viewer.layers["annotations"].brush_size == _ANNOTATION_INITIAL_BRUSH_SIZE
 
 
 def test_project_annotations_helper():
