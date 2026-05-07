@@ -122,7 +122,11 @@ class IntensityWidget(QWidget):
             self._target_combo.itemText(i)
             for i in range(self._target_combo.count())
         ]
-        if current in items:
+        if current in groups:
+            self._target_combo.setCurrentText(current)
+        elif len(groups) == 1:
+            self._target_combo.setCurrentText(groups[0])
+        elif current in items:
             self._target_combo.setCurrentText(current)
         else:
             self._target_combo.setCurrentText(_TARGET_SINGLE)

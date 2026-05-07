@@ -93,6 +93,7 @@ def test_target_combo_lists_groups(make_napari_viewer, qtbot):
         },
     )
     assert "exp_1" in items()
+    assert widget._target_combo.currentText() == "exp_1"
 
 
 @_CI_XFAIL

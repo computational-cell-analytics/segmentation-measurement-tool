@@ -13,6 +13,8 @@ pairing as a table before saving.
 
 from __future__ import annotations
 
+from math import ceil, sqrt
+
 import napari
 from qtpy.QtWidgets import (
     QAbstractItemView,
@@ -44,6 +46,25 @@ from segmentation_measurement._groups import (
 )
 
 _NAME_ROLE = 0x0100  # Qt.UserRole — store raw group name on list items.
+_GRID_LINK_EXCLUDED_ATTRIBUTES = frozenset({
+    "affine",
+    "axis_labels",
+    "data",
+    "extent",
+    "features",
+    "loaded",
+    "metadata",
+    "mode",
+    "name",
+    "properties",
+    "rotate",
+    "scale",
+    "shear",
+    "status",
+    "thumbnail",
+    "translate",
+    "units",
+})
 
 
 class GroupManagerWidget(QWidget):
@@ -91,6 +112,9 @@ class GroupManagerWidget(QWidget):
         delete_btn = QPushButton("Delete selected")
         delete_btn.clicked.connect(self._delete_selected)
         list_layout.addWidget(delete_btn)
+        arrange_btn = QPushButton("Arrange selected as grid")
+        arrange_btn.clicked.connect(self._arrange_selected_as_grid)
+        list_layout.addWidget(arrange_btn)
         list_group.setLayout(list_layout)
         layout.addWidget(list_group)
 
@@ -325,3 +349,127 @@ class GroupManagerWidget(QWidget):
         if item is None:
             return
         delete_group(self._viewer, item.data(_NAME_ROLE))
+
+    def _arrange_selected_as_grid(self) -> None:
+        item = self._group_list.currentItem()
+        if item is None:
+            QMessageBox.warning(
+                self,
+                "No group selected",
+                "Select a group to arrange it as a grid.",
+            )
+            return
+        name = item.data(_NAME_ROLE)
+        try:
+            members = get_group(self._viewer, name)
+            self._arrange_group_as_grid(members)
+        except (KeyError, ValueError) as exc:
+            QMessageBox.warning(self, "Could not arrange group", str(exc))
+
+    def _arrange_group_as_grid(self, members: dict[str, list[str]]) -> None:
+        seg_names = members.get(ROLE_SEGMENTATION, [])
+        if not seg_names:
+            raise ValueError("The group does not contain segmentation layers.")
+
+        seg_layers = [self._get_layer(name) for name in seg_names]
+        cell_shape = self._grid_cell_shape(seg_layers)
+        n_cols = ceil(sqrt(len(seg_layers)))
+
+        for index, seg_layer in enumerate(seg_layers):
+            row, col = divmod(index, n_cols)
+            offset = (row * cell_shape[0], col * cell_shape[1])
+            for role in (
+                ROLE_INTENSITY_IMAGE,
+                ROLE_NUCLEUS_SEGMENTATION,
+                ROLE_SEGMENTATION,
+            ):
+                layer_names = members.get(role, [])
+                if index >= len(layer_names):
+                    continue
+                layer = self._get_layer(layer_names[index])
+                self._set_layer_grid_position(layer, offset)
+
+        for role in (
+            ROLE_SEGMENTATION,
+            ROLE_NUCLEUS_SEGMENTATION,
+            ROLE_INTENSITY_IMAGE,
+        ):
+            self._link_role_layers(members.get(role, []))
+
+        # Move arranged layers to the top in draw order for each grid cell:
+        # intensity at the bottom, then nucleus labels, then segmentation.
+        for index in range(len(seg_layers)):
+            for role in (
+                ROLE_INTENSITY_IMAGE,
+                ROLE_NUCLEUS_SEGMENTATION,
+                ROLE_SEGMENTATION,
+            ):
+                layer_names = members.get(role, [])
+                if index < len(layer_names):
+                    self._move_layer_to_top(layer_names[index])
+
+    def _get_layer(self, name: str) -> napari.layers.Layer:
+        try:
+            return self._viewer.layers[name]
+        except KeyError as exc:
+            raise ValueError(
+                f"Group references layer '{name}', which is not in the viewer."
+            ) from exc
+
+    @staticmethod
+    def _grid_cell_shape(layers: list[napari.layers.Layer]) -> tuple[float, float]:
+        sizes = []
+        for layer in layers:
+            shape = getattr(layer.data, "shape", ())
+            if len(shape) < 2:
+                raise ValueError(
+                    f"Layer '{layer.name}' must have at least two dimensions "
+                    "to be arranged in a grid."
+                )
+            scale = layer.scale
+            size_y = float(shape[-2]) * float(scale[-2])
+            size_x = float(shape[-1]) * float(scale[-1])
+            sizes.append((size_y, size_x))
+        max_y = max(size[0] for size in sizes)
+        max_x = max(size[1] for size in sizes)
+        return max_y, max_x
+
+    @staticmethod
+    def _set_layer_grid_position(
+        layer: napari.layers.Layer, offset: tuple[float, float]
+    ) -> None:
+        translate = layer.translate.copy()
+        translate[-2] = offset[0]
+        translate[-1] = offset[1]
+        layer.translate = translate
+
+    def _link_role_layers(self, layer_names: list[str]) -> None:
+        if len(layer_names) < 2:
+            return
+        layers = [self._get_layer(name) for name in layer_names]
+        attrs = self._linkable_non_spatial_attributes(layers)
+        if attrs:
+            self._viewer.layers.link_layers(layers, attributes=attrs)
+
+    @staticmethod
+    def _linkable_non_spatial_attributes(
+        layers: list[napari.layers.Layer],
+    ) -> list[str]:
+        common = set.intersection(*(set(layer.events) for layer in layers))
+        common -= _GRID_LINK_EXCLUDED_ATTRIBUTES
+        attrs = []
+        for attr in common:
+            if attr.startswith("_"):
+                continue
+            if all(
+                hasattr(layer, attr) and not callable(getattr(layer, attr))
+                for layer in layers
+            ):
+                attrs.append(attr)
+        return sorted(attrs)
+
+    def _move_layer_to_top(self, layer_name: str) -> None:
+        layer = self._get_layer(layer_name)
+        layers = self._viewer.layers
+        src = layers.index(layer)
+        layers.move(src, len(layers))
