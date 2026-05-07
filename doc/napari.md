@@ -587,7 +587,7 @@ The Classification Analysis widget lets you interactively annotate a small numbe
 segments with class labels using napari's paint tools, train a random forest or logistic
 regression classifier on those annotations, and then apply it to every segment in the
 table.  The result is written to a new label layer and two new columns in the measurement
-table.  Trained classifiers can be exported to disk and reloaded later.
+table.  Trained classifiers can be exported to disk for batch use from the CLI.
 
 ### Layout (scrollable)
 
@@ -597,7 +597,6 @@ table.  Trained classifiers can be exported to disk and reloaded later.
 │ ┌ Layers ──────────────────────────┐ │
 │ │ Segmentation: [combo]            │ │
 │ │ Annotation layer: [combo] [Create new] │
-│ │ [Project annotations to features]│ │
 │ └──────────────────────────────────┘ │
 │ ┌ Class names ─────────────────────┐ │
 │ │  Label ID │ Class Name           │ │
@@ -607,8 +606,9 @@ table.  Trained classifiers can be exported to disk and reloaded later.
 │ │ Method: [Random Forest▾]         │ │
 │ │  <method-specific parameters>    │ │
 │ │ Output layer: [edit]             │ │
+│ │ [x] Live Update                  │ │
 │ │ [Train & Apply]                  │ │
-│ │ [Load classifier] [Apply] [Export classifier] │
+│ │ [Export classifier]              │ │
 │ └──────────────────────────────────┘ │
 └──────────────────────────────────────┘
 ```
@@ -640,6 +640,9 @@ persistence cannot accidentally overwrite an unrelated label layer.
 2. Alternatively, select an existing Labels layer from the **Annotation layer** dropdown
    if you already have annotations you want to use.
 
+The active annotation layer is outlined by a thin frame in the image space.  In group
+mode the frame follows the current member position in the grid.
+
 #### Step 3 – Paint annotations
 
 Use napari's built-in label painting tools to draw brushstrokes on the annotation layer.
@@ -649,20 +652,22 @@ Use napari's built-in label painting tools to draw brushstrokes on the annotatio
 * Paint at least a few representative segments from each class.  You do not need to
   annotate every segment — the classifier will be applied to the rest automatically.
 
-#### Step 4 – Project annotations into features
+#### Step 4 – Review projected annotations
 
-Click **Project annotations to features**.  The widget:
+Whenever you finish painting, erasing, or changing labels in the annotation
+layer, the widget waits briefly and then automatically:
 
 1. Reads the pixel-level brushstrokes from the annotation layer.
 2. For each segment in the segmentation, takes the **majority-vote** annotation label
    across all annotated pixels that overlap that segment.  Segments with no annotation
    overlap receive annotation `0` (unannotated).
 3. Merges an `annotation` column into the source layer's `features` (overwriting any
-   previous annotation values).  The Features Table dock is opened automatically.
+   previous annotation values).
 4. Populates the **Class names** table with all annotation label IDs detected.
 
-> **Tip:** Repeat steps 3 and 4 as many times as needed.  Each click of **Project
-> annotations to features** re-reads the current state of the annotation layer.
+Because the projection is based on the full current annotation layer, removed
+brushstrokes set the corresponding segment annotation back to `0`, and repainting
+with another label updates the value in the table.
 
 #### Step 5 – Name the classes (optional)
 
@@ -676,7 +681,9 @@ field.  Click a name cell and type to rename a class (e.g. change `class_1` to
 1. Choose a **Method** (default: **Random Forest**) and adjust the parameters if needed
    (see table below).
 2. Enter an **Output layer** name (default: `classification`).
-3. Click **Train & Apply**.
+3. Leave **Live Update** enabled to retrain and apply the classifier automatically after
+   annotation edits.  Disable it to enable the **Train & Apply** button and run the
+   classifier manually.
 
 Three things happen:
 
@@ -687,15 +694,15 @@ Three things happen:
 * The classifier is applied to **every** row in the layer's features (including
   unannotated ones).  Results are merged back into the source layer's `features` as
   two new columns: `classification_id` (1-based integer) and `classification_name`
-  (string).  The Features Table dock is opened automatically with that layer
-  selected.
+  (string).  Manual **Train & Apply** also opens the Features Table dock with that
+  layer selected; live updates keep the current layer selection unchanged.
 * A new Labels layer is created (or updated) in napari where each segment is painted with
   its `classification_id`.  Colours are keyed off the class ID itself
   (using `tab10` for ≤10 classes and `tab20` beyond that), so the same
   class always renders in the same colour even when other classes are
   absent from a particular layer.
 
-If you re-run **Train & Apply**, existing `classification_id` and `classification_name`
+If the classifier is re-run, existing `classification_id` and `classification_name`
 columns are excluded from the feature set so they do not affect the new result.
 
 In group mode the classifier is trained on the **concatenation** of all
@@ -739,20 +746,11 @@ Classification IDs are **1-based** and match the annotation label values painted
 annotation layer.  A segment that could not be classified (e.g. because all its feature
 values were NaN) receives `classification_id = 0` and an empty `classification_name`.
 
-#### Applying a pre-trained classifier
-
-To apply a classifier that was saved in a previous session:
-
-1. Click **Load classifier** and select a `.joblib` file.
-2. Click **Apply** (without retraining).
-
-The loaded classifier is applied to the current table immediately.
-
 ### Exporting the classifier
 
 Click **Export classifier** to save the trained pipeline (StandardScaler +
-classifier) to a `.joblib` file.  The exported file can be reloaded in the widget (see
-above) or used with the `analyze classify` CLI command to apply it to new tables in batch.
+classifier) to a `.joblib` file.  The exported file can be used with the
+`analyze classify` CLI command to apply it to new tables in batch.
 
 ### Saving the table
 

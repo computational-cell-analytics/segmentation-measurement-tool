@@ -5,9 +5,10 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import napari
-from qtpy.QtCore import Qt
+from qtpy.QtCore import Qt, QTimer
 from qtpy.QtWidgets import (
     QComboBox,
+    QCheckBox,
     QDoubleSpinBox,
     QFileDialog,
     QGroupBox,
@@ -42,6 +43,15 @@ _TARGET_SINGLE = "<single layer>"
 _NONE_ANN = "(none)"
 _ANNOTATION_PREVIEW_MAX_CLASS_ID = 10
 _ANNOTATION_CMAP_CONNECTED_KEY = "_segmentation_measurement_annotation_cmap"
+_ANNOTATION_PROJECTION_CONNECTED_KEY = (
+    "_segmentation_measurement_annotation_projection"
+)
+_ANNOTATION_PROJECTION_DEBOUNCE_MS = 250
+_ANNOTATION_EDIT_EVENTS = ("paint",)
+_ANNOTATION_FRAME_LAYER_NAME = "annotation frame"
+_ANNOTATION_FRAME_COLOR = "#ffff00"
+_ANNOTATION_FRAME_WIDTH = 2
+_ANNOTATION_INITIAL_BRUSH_SIZE = 5
 
 
 class ClassificationWidget(QWidget):
@@ -49,11 +59,11 @@ class ClassificationWidget(QWidget):
 
     Operates on the ``features`` table of the selected Labels layer.
     Users paint brushstroke annotations on a dedicated annotation layer.
-    Clicking *Project annotations* maps per-pixel annotations to
+    Painting in the annotation layer maps per-pixel annotations to
     per-segment labels via majority vote and merges them into the source
-    layer's ``features`` under an ``annotation`` column.  Training uses
-    the annotated rows to fit a logistic regression or random forest
-    classifier; *Apply* writes ``classification_id`` and
+    layer's ``features`` under an ``annotation`` column.  Training uses the
+    annotated rows to fit a logistic regression or random forest classifier;
+    *Apply* writes ``classification_id`` and
     ``classification_name`` columns back into the source layer's
     ``features`` and creates a new label layer for visualisation.
     Trained classifiers can be exported and reloaded.
@@ -82,6 +92,16 @@ class ClassificationWidget(QWidget):
         self._member_annotations: dict[str, dict] = {}
         self._current_member: str | None = None
         self._annotation_colormap_updating = False
+        self._annotation_projection_suspended = False
+        self._live_update_running = False
+        self._annotation_projection_timer = QTimer(self)
+        self._annotation_projection_timer.setSingleShot(True)
+        self._annotation_projection_timer.setInterval(
+            _ANNOTATION_PROJECTION_DEBOUNCE_MS
+        )
+        self._annotation_projection_timer.timeout.connect(
+            self._run_debounced_annotation_projection
+        )
         self._setup_ui()
         self._seg_combo.currentTextChanged.connect(self._on_seg_combo_changed)
         self._ann_combo.currentTextChanged.connect(self._on_ann_combo_changed)
@@ -137,10 +157,6 @@ class ClassificationWidget(QWidget):
         ann_row.addWidget(create_btn)
         layout.addLayout(ann_row)
 
-        project_btn = QPushButton("Project annotations to features")
-        project_btn.clicked.connect(self._project_annotations)
-        layout.addWidget(project_btn)
-
         group.setLayout(layout)
         return group
 
@@ -180,17 +196,19 @@ class ClassificationWidget(QWidget):
         out_row.addWidget(self._out_name)
         layout.addLayout(out_row)
 
-        train_btn = QPushButton("Train & Apply")
-        train_btn.clicked.connect(self._train_and_apply)
-        layout.addWidget(train_btn)
+        self._live_update_checkbox = QCheckBox("Live Update")
+        self._live_update_checkbox.setChecked(True)
+        self._live_update_checkbox.stateChanged.connect(
+            self._on_live_update_changed
+        )
+        layout.addWidget(self._live_update_checkbox)
+
+        self._train_btn = QPushButton("Train & Apply")
+        self._train_btn.clicked.connect(lambda _checked=False: self._train_and_apply())
+        layout.addWidget(self._train_btn)
+        self._on_live_update_changed()
 
         file_row = QHBoxLayout()
-        load_btn = QPushButton("Load classifier")
-        load_btn.clicked.connect(self._load_classifier)
-        file_row.addWidget(load_btn)
-        apply_btn = QPushButton("Apply")
-        apply_btn.clicked.connect(self._apply_classifier_only)
-        file_row.addWidget(apply_btn)
         export_btn = QPushButton("Export classifier")
         export_btn.clicked.connect(self._export_classifier)
         file_row.addWidget(export_btn)
@@ -255,6 +273,9 @@ class ClassificationWidget(QWidget):
     def _on_method_changed(self, index: int) -> None:
         self._params_stack.setCurrentIndex(index)
 
+    def _on_live_update_changed(self, event: object = None) -> None:
+        self._train_btn.setEnabled(not self._live_update_checkbox.isChecked())
+
     def _update_target_combo(self) -> None:
         groups = list_groups(self._viewer)
         current = self._target_combo.currentText()
@@ -309,6 +330,7 @@ class ClassificationWidget(QWidget):
 
     def _on_ann_combo_changed(self, name: str) -> None:
         if not name or name == _NONE_ANN:
+            self._update_annotation_frame()
             return
         ann = self._ann_layer()
         if ann is not None:
@@ -337,11 +359,16 @@ class ClassificationWidget(QWidget):
             return
         seg = self._viewer.layers[member_name]
         cached = self._member_annotations.get(member_name)
-        if cached is not None and cached["shape"] == tuple(seg.data.shape):
-            ann.data = _decompress_annotation(cached)
-        else:
-            ann.data = np.zeros(seg.data.shape, dtype=np.int32)
-        copy_layer_spatial_metadata(seg, ann)
+        self._annotation_projection_suspended = True
+        try:
+            if cached is not None and cached["shape"] == tuple(seg.data.shape):
+                ann.data = _decompress_annotation(cached)
+            else:
+                ann.data = np.zeros(seg.data.shape, dtype=np.int32)
+            copy_layer_spatial_metadata(seg, ann)
+        finally:
+            self._annotation_projection_suspended = False
+        self._update_annotation_frame(ann)
 
     def _sync_annotation_layer_to_segmentation(self) -> None:
         """Place the active annotation layer over the selected segmentation."""
@@ -349,9 +376,14 @@ class ClassificationWidget(QWidget):
         ann = self._ann_layer()
         if seg is None or ann is None or ann.name == seg.name:
             return
-        if tuple(ann.data.shape) != tuple(seg.data.shape):
-            ann.data = np.zeros(seg.data.shape, dtype=np.int32)
-        copy_layer_spatial_metadata(seg, ann)
+        self._annotation_projection_suspended = True
+        try:
+            if tuple(ann.data.shape) != tuple(seg.data.shape):
+                ann.data = np.zeros(seg.data.shape, dtype=np.int32)
+            copy_layer_spatial_metadata(seg, ann)
+        finally:
+            self._annotation_projection_suspended = False
+        self._update_annotation_frame(ann)
 
     def _ann_layer(self) -> object | None:
         ann_name = self._ann_combo.currentText()
@@ -362,6 +394,66 @@ class ClassificationWidget(QWidget):
         ):
             return None
         return self._viewer.layers[ann_name]
+
+    def _annotation_frame_coords(self, ann: object) -> np.ndarray | None:
+        shape = tuple(getattr(ann, "data", np.empty(())).shape)
+        if len(shape) < 2:
+            return None
+        ndim = len(shape)
+        height, width = shape[-2:]
+        coords = np.zeros((5, ndim), dtype=float)
+        coords[:, -2:] = [
+            [-0.5, -0.5],
+            [-0.5, width - 0.5],
+            [height - 0.5, width - 0.5],
+            [height - 0.5, -0.5],
+            [-0.5, -0.5],
+        ]
+        return coords
+
+    def _update_annotation_frame(self, ann: object | None = None) -> None:
+        if ann is None:
+            ann = self._ann_layer()
+        valid = ann is not None and ann is not self._seg_layer()
+        coords = self._annotation_frame_coords(ann) if valid else None
+        if coords is None:
+            if _ANNOTATION_FRAME_LAYER_NAME in self._viewer.layers:
+                self._viewer.layers[_ANNOTATION_FRAME_LAYER_NAME].visible = False
+            return
+
+        selected_names = [layer.name for layer in self._viewer.layers.selection]
+        active = self._viewer.layers.selection.active
+        active_name = active.name if active is not None else None
+        try:
+            if _ANNOTATION_FRAME_LAYER_NAME in self._viewer.layers:
+                frame = self._viewer.layers[_ANNOTATION_FRAME_LAYER_NAME]
+                frame.data = [coords]
+            else:
+                frame = self._viewer.add_shapes(
+                    [coords],
+                    shape_type="path",
+                    name=_ANNOTATION_FRAME_LAYER_NAME,
+                    edge_color=_ANNOTATION_FRAME_COLOR,
+                    edge_width=_ANNOTATION_FRAME_WIDTH,
+                )
+            try:
+                frame.mode = "pan_zoom"
+            except AttributeError:
+                pass
+            copy_layer_spatial_metadata(ann, frame)
+            frame.visible = bool(getattr(ann, "visible", True))
+            if hasattr(self._viewer.layers, "move"):
+                self._viewer.layers.move(
+                    self._viewer.layers.index(frame),
+                    len(self._viewer.layers) - 1,
+                )
+        finally:
+            self._viewer.layers.selection.clear()
+            for name in selected_names:
+                if name in self._viewer.layers:
+                    self._viewer.layers.selection.add(self._viewer.layers[name])
+            if active_name is not None and active_name in self._viewer.layers:
+                self._viewer.layers.selection.active = self._viewer.layers[active_name]
 
     def _update_layer_combos(self, event: object = None) -> None:
         from napari.layers import Labels
@@ -464,11 +556,13 @@ class ClassificationWidget(QWidget):
             return
         ann_data = np.zeros_like(seg.data, dtype=np.int32)
         layer = self._viewer.add_labels(ann_data, name="annotations")
+        layer.brush_size = _ANNOTATION_INITIAL_BRUSH_SIZE
         copy_layer_spatial_metadata(seg, layer)
         self._prepare_annotation_layer(layer)
         self._ann_combo.setCurrentText(layer.name)
+        self._update_annotation_frame(layer)
 
-    def _project_annotations(self) -> None:
+    def _project_annotations(self, show_table: bool = True) -> None:
         seg = self._seg_layer()
         if seg is None:
             return
@@ -496,7 +590,50 @@ class ClassificationWidget(QWidget):
 
         self._update_class_names_table(self._collect_annotation_ids())
         self._apply_annotation_colormap()
-        show_features_table(self._viewer, seg)
+        if show_table:
+            show_features_table(self._viewer, seg)
+
+    def _on_annotation_layer_edited(self, event: object = None) -> None:
+        if self._annotation_projection_suspended:
+            return
+        ann = self._ann_layer()
+        if ann is None:
+            return
+        if getattr(event, "source", ann) is not ann:
+            return
+        self._annotation_projection_timer.start()
+
+    def _run_debounced_annotation_projection(self) -> None:
+        self._project_annotations(show_table=False)
+        if self._live_update_checkbox.isChecked():
+            self._train_and_apply_live()
+
+    def _flush_pending_annotation_projection(self) -> None:
+        if not self._annotation_projection_timer.isActive():
+            return
+        self._annotation_projection_timer.stop()
+        self._project_annotations(show_table=False)
+
+    def _train_and_apply_live(self) -> None:
+        if self._live_update_running:
+            return
+        selected_names = [layer.name for layer in self._viewer.layers.selection]
+        active = self._viewer.layers.selection.active
+        active_name = active.name if active is not None else None
+        self._live_update_running = True
+        try:
+            self._train_and_apply(
+                show_table=False,
+                flush_pending_annotation_projection=False,
+            )
+        finally:
+            self._live_update_running = False
+            self._viewer.layers.selection.clear()
+            for name in selected_names:
+                if name in self._viewer.layers:
+                    self._viewer.layers.selection.add(self._viewer.layers[name])
+            if active_name is not None and active_name in self._viewer.layers:
+                self._viewer.layers.selection.active = self._viewer.layers[active_name]
 
     def _collect_annotation_ids(self) -> list[int]:
         """Return all unique non-zero annotation IDs across the target.
@@ -570,8 +707,14 @@ class ClassificationWidget(QWidget):
             "max_iter": self._lr_iter_spin.value(),
         }
 
-    def _train_and_apply(self) -> None:
+    def _train_and_apply(
+        self,
+        show_table: bool = True,
+        flush_pending_annotation_projection: bool = True,
+    ) -> None:
         from segmentation_measurement.analysis import train_classifier
+        if flush_pending_annotation_projection:
+            self._flush_pending_annotation_projection()
         feats = self._features_for_classifier()
         if feats is None or "annotation" not in feats.columns:
             return
@@ -580,10 +723,19 @@ class ClassificationWidget(QWidget):
             self._classifier = train_classifier(feats, method=method, **kwargs)
         except ValueError:
             return
-        self._apply_classifier_only()
+        self._apply_classifier_only(
+            show_table=show_table,
+            flush_pending_annotation_projection=False,
+        )
 
-    def _apply_classifier_only(self) -> None:
+    def _apply_classifier_only(
+        self,
+        show_table: bool = True,
+        flush_pending_annotation_projection: bool = True,
+    ) -> None:
         from segmentation_measurement.analysis import apply_classifier
+        if flush_pending_annotation_projection:
+            self._flush_pending_annotation_projection()
         if self._classifier is None:
             return
         target = self._target_combo.currentText()
@@ -613,7 +765,8 @@ class ClassificationWidget(QWidget):
                 result[["index", "classification_id", "classification_name"]],
             )
             self._create_output_layer(seg, result, out_name, max_class)
-            show_features_table(self._viewer, seg)
+            if show_table:
+                show_features_table(self._viewer, seg)
             return
 
         # Group target.
@@ -648,7 +801,7 @@ class ClassificationWidget(QWidget):
             if first_layer is None:
                 first_layer = seg_layer
         link_layers_preserving_grid(self._viewer, output_layers)
-        if first_layer is not None:
+        if first_layer is not None and show_table:
             show_features_table(self._viewer, first_layer)
 
     def _create_output_layer(
@@ -710,12 +863,26 @@ class ClassificationWidget(QWidget):
         ):
             try:
                 ann.events.selected_label.connect(
-                    lambda _event=None: self._apply_annotation_colormap()
+                    self._on_annotation_selected_label_changed
                 )
                 metadata[_ANNOTATION_CMAP_CONNECTED_KEY] = True
             except AttributeError:
                 pass
+        if isinstance(metadata, dict) and not metadata.get(
+            _ANNOTATION_PROJECTION_CONNECTED_KEY, False
+        ):
+            for event_name in _ANNOTATION_EDIT_EVENTS:
+                try:
+                    getattr(ann.events, event_name).connect(
+                        self._on_annotation_layer_edited
+                    )
+                except AttributeError:
+                    pass
+            metadata[_ANNOTATION_PROJECTION_CONNECTED_KEY] = True
         self._apply_annotation_colormap(ann)
+
+    def _on_annotation_selected_label_changed(self, event: object = None) -> None:
+        self._apply_annotation_colormap()
 
     def _export_classifier(self) -> None:
         if self._classifier is None:
@@ -727,16 +894,6 @@ class ClassificationWidget(QWidget):
         if path:
             import joblib
             joblib.dump(self._classifier, path)
-
-    def _load_classifier(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Load classifier", "",
-            "Joblib (*.joblib);;All Files (*)",
-        )
-        if path:
-            import joblib
-            self._classifier = joblib.load(path)
-
 
 # ------------------------------------------------------------------ helpers ---
 
